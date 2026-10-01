@@ -1,0 +1,10 @@
+# Build outputs and directories
+build/
+**/build/
+*.dSYM/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+MakefileAGENTS.md
+AGENTS.md
+build-hw/
