@@ -1,0 +1,3 @@
+[submodule "lib/SSDV"]
+	path = lib/SSDV
+	url = https://github.com/LG-CubeSat/SSDV/
