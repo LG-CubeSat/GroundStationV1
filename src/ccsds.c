@@ -3,9 +3,6 @@
 
 #define MAX_PACKET_SIZE 256U // largest packet we expect, placeholder for now
 
-#define INPUT_PATH // put stuff here later
-#define OUTPUT_PATH // put stuff here later
-
 static size_t radio_read(uint8_t *buffer, size_t max_bytes)
 {
     (void)buffer;
