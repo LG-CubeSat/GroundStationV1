@@ -76,11 +76,20 @@ int main(void) {
     
     // sending stuff, wip
     /*
-    ccsds_cmd_t command;
-    lg_ccsds_profile_build(LG_CCSDS_CONTENT_RAW_TELEMETRY,
-                         sequence_count, item_count, NULL,
-                         telemetry, telemetry_length,
-                         packet_buffer, sizeof packet_buffer, &packet_length); // none of these parameters are defined so far
+    sequence_count = 0; // placeholder
+    item_count = 1; // if sending one command
+    uint8_t packet_buffer[MAX_PACKET_SIZE];
+    size_t packet_length;
+    for(;;) {
+        uint8_t command[MAX_PACKET_SIZE]; // if we make custom command_t, will need decoder/encoder
+        size_t command_length = 0; // placeholder
+        lg_ccsds_profile_build(LG_CCSDS_CONTENT_COMMAND,
+                            sequence_count, item_count, NULL,
+                            command, command_length,
+                            packet_buffer, sizeof packet_buffer, &packet_length);
+        radio_send(packet_buffer, packet_length);
+        // sequence_count = (sequence_count + 1) % CCSDS_SPACE_PACKET_MAX_SEQUENCE_COUNT; // increments every time you send command, keep if this command stream is meant to be constantly sending and sat is checking continuity
+    }
     */
     return EXIT_SUCCESS;
 }
