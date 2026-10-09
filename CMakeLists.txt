@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(GroundStation LANGUAGES C)
 
+add_subdirectory(lib/ccsds)
+
 add_library(SSDV STATIC lib/SSDV/rs8.c lib/SSDV/ssdv.c)
 
 add_library(simpl_SSDV INTERFACE)
