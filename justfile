@@ -1,4 +1,5 @@
 build:
+    mkdir build
     cp ./slop/joi.jpg ./build
     cp ./slop/john.jpg ./build
     cmake -S . -B build
