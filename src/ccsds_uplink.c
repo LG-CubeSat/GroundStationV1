@@ -7,8 +7,8 @@
 #define PACKET_SIZE 256U // placeholder
 
 int main() {
-    sequence_count = 0; // placeholder
-        item_count = 1; // if sending one command
+    int sequence_count = 0; // placeholder
+        int item_count = 1; // if sending one command
         uint8_t packet_buffer[PACKET_SIZE];
         size_t packet_length;
         for(;;) {

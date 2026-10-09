@@ -2,7 +2,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include "ccsds/ccsds.h"
-#include "radio.h"
+#include "radio/radio.h"
 
 #define MAX_PACKET_SIZE 256U // largest packet we expect, placeholder for now
 
@@ -66,7 +66,7 @@ int main(void) {
 
     for (;;) {
         // byte_count = radio_recv(radio_buffer, (uint16_t)sizeof radio_buffer);
-        radio_recv(radio_buffer, (uint16_t)sizeof radio_buffer);
+        radio_receive(radio_buffer, (uint16_t)sizeof radio_buffer);
         byte_count = sizeof radio_buffer; // stub, always reads 0. Radio needs to say how many bytes are read, impossible from this end because raw bytes mean there is no terminator character
         ccsds_status_t feed_status = ccsds_stream_parser_feed(&receiver, radio_buffer, byte_count,
                                                               handler, &view, &packets_delivered); // data -> packets, handled in callback handler()
