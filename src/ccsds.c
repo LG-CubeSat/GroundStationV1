@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <errno.h>
+#include <stdlib.h>
 #include "ccsds/ccsds.h"
 #include "radio.h"
 
@@ -10,7 +12,7 @@ ccsds_status_t telemetry_handler(const uint8_t *packet, size_t packet_length, vo
     return CCSDS_OK;
 }
 
-ccsds_status_t handler(const uint8_t *packet, size_t packet_length, void *user_data)
+ccsds_status_t handler(const uint8_t *packet, size_t packet_length, void *user_data) // ingest.c in FlightSoftwareV1.1 has a lot of useful information
 {
     ccsds_status_t parse_status;
     lg_ccsds_profile_view_t *view = user_data;
@@ -26,9 +28,9 @@ ccsds_status_t handler(const uint8_t *packet, size_t packet_length, void *user_d
             fprintf(stderr, "Recieved compressed telemetry data, decompressing...");
             uint8_t decoded_samples[1024]; // placeholder
             size_t decoded_length;
-            ccsds_121_decode(&view.metadata.compression,
-                             view.payload, view.payload_length,
-                             view.metadata.item_count,
+            ccsds_121_decode(&view->metadata.compression,
+                             view->payload, view->payload_length,
+                             view->metadata.item_count,
                              decoded_samples, sizeof decoded_samples, &decoded_length);
             return telemetry_handler(decoded_samples, decoded_length, user_data); // assumes that decoded_samples will end up in the same format as the packet
         case LG_CCSDS_CONTENT_SSDV:
@@ -63,7 +65,9 @@ int main(void) {
     }
 
     for (;;) {
-        byte_count = radio_recv(&radio_buffer, sizeof radio_buffer); // stub, always reads 0. Radio needs to say how many bytes are read, impossible from this end because raw bytes mean there is no terminator character
+        // byte_count = radio_recv(radio_buffer, (uint16_t)sizeof radio_buffer);
+        radio_recv(radio_buffer, (uint16_t)sizeof radio_buffer);
+        byte_count = sizeof radio_buffer; // stub, always reads 0. Radio needs to say how many bytes are read, impossible from this end because raw bytes mean there is no terminator character
         ccsds_status_t feed_status = ccsds_stream_parser_feed(&receiver, radio_buffer, byte_count,
                                                               handler, &view, &packets_delivered); // data -> packets, handled in callback handler()
         if (feed_status != CCSDS_OK) {
