@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include "SSDV/ssdv.h"
+#include "../SSDV/ssdv.h"
 
 // Sloppity-slop header to simplify SSDV development
 
