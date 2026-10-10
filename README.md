@@ -7,6 +7,7 @@ The ground station code will reside on a normal laptop and must control the ante
 - [ ] CCSDS Decoding
 - [ ] NNG Send / Recv 
 - [ ] CBOR Encoding / Decoding
+- [ ] Packet Police
 - [ ] Bringing it all together
 
 ### Ground Station UI
