@@ -10,14 +10,14 @@ The entire radio code will need to be revised once we get a Sat Nogs COMM Board,
 int radio_send(const uint8_t *data, size_t length)
 {
     (void)data;
-    printf("[RADIO] (mock) would transmit %zu bytes to ground\n", length);
+    printf("[RADIO] (mock) would transmit %zu bytes to satellite\n", length);
     fflush(stdout);
     return 0;
 }
 
 int radio_receive(uint8_t *buffer, uint16_t max_length) {
     (void)*buffer;
-    printf("[RADIO] (mock) would receive up to %zu bytes from ground\n", (size_t) max_length);
+    printf("[RADIO] (mock) would receive up to %zu bytes from satellite\n", (size_t) max_length);
     fflush(stdout);
     return 0;
 }

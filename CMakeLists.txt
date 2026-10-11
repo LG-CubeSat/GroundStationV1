@@ -20,10 +20,6 @@ add_executable(GroundStationCCSDS src/ccsds.c)
 target_include_directories(GroundStationCCSDS PRIVATE lib/SSDV lib/ccsds/include lib/)
 target_link_libraries(GroundStationCCSDS PRIVATE ccsds radio)
 
-add_executable(GroundStationUplink src/ccsds_uplink.c)
-target_include_directories(GroundStationUplink PRIVATE lib/SSDV lib/ccsds/include lib/)
-target_link_libraries(GroundStationUplink PRIVATE ccsds radio)
-
 add_executable(GroundStationSSDVEncoder slop/ssdv_encoder.c)
 target_include_directories(GroundStationSSDVEncoder PRIVATE lib/SSDV)
 target_link_libraries(GroundStationSSDVEncoder PRIVATE SSDV)

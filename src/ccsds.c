@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 #include "ccsds/ccsds.h"
 #include "radio/radio.h"
 
@@ -23,7 +24,7 @@ ccsds_status_t handler(const uint8_t *packet, size_t packet_length, void *user_d
     }
     switch (view->metadata.content_type) {
         case LG_CCSDS_CONTENT_RAW_TELEMETRY:
-            return telemetry_handler(packet, packet_length, user_data);
+            return telemetry_handler(view->payload, view->payload_length, user_data);
         case LG_CCSDS_CONTENT_COMPRESSED_TELEMETRY:
             fprintf(stderr, "Recieved compressed telemetry data, decompressing...");
             uint8_t decoded_samples[1024]; // placeholder
@@ -48,34 +49,64 @@ ccsds_status_t handler(const uint8_t *packet, size_t packet_length, void *user_d
     return CCSDS_OK;
 }
 
-int main(void) {
+int main(void)
+{
+    lg_ccsds_content_type_t content_type;
+    uint8_t compressed[MAX_PACKET_SIZE];
+    size_t compressed_length;
+    uint8_t radio_buffer[MAX_PACKET_SIZE];
+    size_t radio_length;
+    uint8_t incoming_buffer[MAX_PACKET_SIZE];
+    size_t byte_count;
     ccsds_stream_parser_t receiver;
     uint8_t receive_storage[MAX_PACKET_SIZE];
     lg_ccsds_profile_view_t view;
-    uint8_t radio_buffer[MAX_PACKET_SIZE];
-    size_t byte_count;
     size_t packets_delivered = 0;
 
-    // receiving stuff
-    // run this code when information recieved by radio
+    // --- SENDING CCSDS ----
+    // example packet
+    uint8_t payload[MAX_PACKET_SIZE] = {0x01, 0x02, 0x03, 0x04}; // command_t still needs to be defined
+    size_t payload_length = 32;
+    content_type = LG_CCSDS_CONTENT_COMMAND; // should always be command at ground
+    int item_count = 1; // amount of commands in payload
+
+    // if sending one command
+    int sequence_count = 0; // will need to increment each send if radio sent regularly and sat checking continuity
+
+    ccsds_status_t encode_status = lg_ccsds_profile_build(content_type,
+                                                          sequence_count, item_count, NULL,
+                                                          payload, payload_length,
+                                                          compressed, sizeof compressed, &compressed_length);
+    if (encode_status != CCSDS_OK) {
+        fprintf(stderr, "CCSDS encoder failure: %s\n", ccsds_status_string(encode_status));
+        return EXIT_FAILURE;
+    }
+     // mock radio send
+    memcpy(radio_buffer, compressed, compressed_length);
+    radio_length = compressed_length;
+    // radio_send(radio_buffer, radio_length);
+
+    // --- RECEIVING CCSDS ---
     ccsds_status_t init_status = ccsds_stream_parser_init(&receiver, receive_storage, sizeof receive_storage); // starts parser
     if (init_status != CCSDS_OK) {
-    fprintf(stderr, "CCSDS parser initiation failure: %s\n", ccsds_status_string(init_status));
-    return EXIT_FAILURE;
+        fprintf(stderr, "CCSDS parser initiation failure: %s\n", ccsds_status_string(init_status));
+        return EXIT_FAILURE;
     }
 
     for (;;) {
-        // byte_count = radio_recv(radio_buffer, (uint16_t)sizeof radio_buffer);
-        radio_receive(radio_buffer, (uint16_t)sizeof radio_buffer);
-        byte_count = sizeof radio_buffer; // stub, always reads 0. Radio needs to say how many bytes are read, impossible from this end because raw bytes mean there is no terminator character
-        ccsds_status_t feed_status = ccsds_stream_parser_feed(&receiver, radio_buffer, byte_count,
-                                                              handler, &view, &packets_delivered); // data -> packets, handled in callback handler()
-        if (feed_status != CCSDS_OK) {
+        // mock radio recieve
+        memcpy(incoming_buffer, radio_buffer, radio_length);
+        byte_count = radio_length;
+        memset(radio_buffer, 0, sizeof(radio_buffer)); // resets radio_buffer
+        radio_length = 0; // resets radio_length
+        // byte_count = radio_receive(radio_buffer, (uint16_t)sizeof radio_buffer);
+
+        ccsds_status_t feed_status = ccsds_stream_parser_feed(&receiver, incoming_buffer, byte_count,
+                                                              handler, &view, &packets_delivered);
+        if (feed_status != CCSDS_OK) { // data -> packets, handled in callback handler()
             fprintf(stderr, "CCSDS parser failure: %s\n", ccsds_status_string(feed_status));
             return EXIT_FAILURE;
         }
-        // if program is superloop: put everything thats in the for loop into the superloop i guess
-        // if program is multithreaded: does this need to break out? if not my work here is done
     }
     return EXIT_SUCCESS;
 }
