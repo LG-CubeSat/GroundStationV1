@@ -1,0 +1,3 @@
+- Codex look over nng and figure out the basic example and learn how it works
+- Finsih stub functions (for main) (nng, qcbor, ccsds stuff)
+- Finsih stub functions (for website) (nng, qcbor, civetweb)

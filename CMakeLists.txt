@@ -12,6 +12,8 @@ add_executable(GSMain src/main.c)
 target_include_directories(GSMain PRIVATE lib/ccsds/include lib/nng/include lib/QCBOR/inc lib/radio lib/simpl_SSDV lib/SSDV)
 target_link_libraries(GSMain PRIVATE SSDV)
 
+# Web Executable uses qcbor, ngg, and civetweb libraries
+
 # Temporary Dev Executables
 add_executable(GroundStationSSDV src/ssdv.c)
 target_include_directories(GroundStationSSDV PRIVATE lib/SSDV lib/ccsds/include lib/simpl_SSDV)

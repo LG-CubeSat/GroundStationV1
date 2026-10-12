@@ -1,5 +1,6 @@
 # Build outputs and directories
 build/*
+docs/
 **/build/
 *.dSYM/
 CMakeFiles/

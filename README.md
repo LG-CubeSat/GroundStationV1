@@ -4,15 +4,20 @@ The ground station code will reside on a normal laptop and must control the ante
 ### Ground Station Main
 - [x] Radio Connection (Handled by a simple library)
 - [x] SSDV Decoding
-- [ ] CCSDS Decoding
+- [ ] CCSDS Encoding / Decoding
 - [ ] NNG Send / Recv 
 - [ ] CBOR Encoding / Decoding
+- [ ] Function Stubs
 - [ ] Packet Police
-- [ ] Bringing it all together
+- [ ] Fill in Stub Implementations
 
 ### Ground Station UI
+- [ ] Install civetweb
 - [ ] NNG Send / Recv
 - [ ] CBOR Encoding / Decoding 
+- [ ] Civetweb stuff
+- [ ] Function Stubs
+- [ ] Fill in Stub Implementations
 - [ ] The Eyecandy
 
 ### Ground Station Backup
@@ -22,6 +27,8 @@ The ground station code will reside on a normal laptop and must control the ante
 - [ ] Tar Zipping
 - [ ] Uploading old ones to internet
 - [ ] Crash Recovery
+- [ ] Function Stubs
+- [ ] Fill in Stub Implementations
 
 ## SSDV
 Currently, we have a extra sloppity-slop library called simpl_ssdv.h, which is for simplifying ssdv use. The main ssdv file is a decoder that parses a file, but in the futre the file part will get chopped off and it will get the data from the radio. SSDVEncoder is just a sloppity-slop test thing for SSDV. WILL be deleted in the future.
