@@ -6,6 +6,7 @@ add_subdirectory(lib/nng)
 add_subdirectory(lib/QCBOR)
 add_subdirectory(lib/radio)
 add_library(SSDV STATIC lib/SSDV/rs8.c lib/SSDV/ssdv.c)
+add_subdirectory(lib/packet_police)
 
 # Prod Executables
 add_executable(GSMain src/main.c)
@@ -23,3 +24,9 @@ target_include_directories(GroundStationCCSDS PRIVATE lib/SSDV lib/ccsds/include
 add_executable(GroundStationSSDVEncoder slop/ssdv_encoder.c)
 target_include_directories(GroundStationSSDVEncoder PRIVATE lib/SSDV lib/simpl_SSDV)
 target_link_libraries(GroundStationSSDVEncoder PRIVATE SSDV)
+
+# Tests
+enable_testing()
+add_executable(packet_police_test tests/test_packet_police.c)
+target_link_libraries(packet_police_test PRIVATE packet_police)
+add_test(NAME packet_police_test COMMAND packet_police_test)
