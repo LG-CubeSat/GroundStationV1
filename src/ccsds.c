@@ -7,12 +7,6 @@
 
 #define MAX_PACKET_SIZE 256U // largest packet we expect, placeholder for now
 
-typedef enum : uint8_t {
-    COMMAND_0 = 0x00,
-    COMMAND_1 = 0x01,
-    COMMAND_2 = 0x02,
-} command_t;
-
 ccsds_status_t telemetry_handler(const uint8_t *packet, size_t packet_length, void *user_data)
 {
     // handle raw telemetry packet
@@ -118,11 +112,14 @@ int main(void)
         memcpy(radio_buffer, wrapped, wrapped_length);
         radio_length = wrapped_length;
         // radio_send(radio_buffer, radio_length);
-        printf("Encoded bytes: ");
+
+
+        printf("Encoded bytes: "); // debug
         for (size_t i = 0; i < radio_length; i++) {
             printf("%02X ", radio_buffer[i]);
         }
         printf("\n");
+
 
         // --- RECEIVING CCSDS ---
 
