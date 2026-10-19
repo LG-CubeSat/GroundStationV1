@@ -5,11 +5,6 @@
 	path = lib/nng
 	url = https://github.com/nanomsg/nng/
 	branch = stable
-[submodule "lib/qcbor"]
-	path = lib/qcbor
-	url = https://github.com/laurencelundblade/QCBOR/
-	branch = v1.6.1
-[submodule "lib/QCBOR"]
-	path = lib/QCBOR
-	url = https://github.com/laurencelundblade/QCBOR
-	branch = v1.6.1
+[submodule "lib/libaec"]
+	path = lib/libaec
+	url = https://github.com/Deutsches-Klimarechenzentrum/libaec/
