@@ -4,17 +4,17 @@ The ground station code will reside on a normal laptop and must control the ante
 ### Ground Station Main
 - [x] Radio Connection (Handled by a simple library)
 - [x] SSDV Decoding
-- [ ] CCSDS Encoding / Decoding
-- [ ] NNG Send / Recv 
-- [ ] CBOR Encoding / Decoding
-- [ ] Function Stubs
+- [x] CCSDS Encoding / Decoding
+- [x] NNG Send / Recv 
 - [ ] Packet Police
-- [ ] Fill in Stub Implementations
+- [x] Function Stubs - Recv
+- [x] Fill in Stub Implementations - Recv
+- [ ] Function Stubs - Send
+- [ ] Fill in Stub Implementations - Send
 
 ### Ground Station UI
 - [ ] Install civetweb
 - [ ] NNG Send / Recv
-- [ ] CBOR Encoding / Decoding 
 - [ ] Civetweb stuff
 - [ ] Function Stubs
 - [ ] Fill in Stub Implementations
