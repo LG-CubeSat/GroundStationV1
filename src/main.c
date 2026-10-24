@@ -8,6 +8,7 @@
 #include <nng/protocol/pubsub0/pub.h>
 
 #include "ccsds/ccsds.h"
+#include "groundstation_message.h"
 #include "radio.h"
 
 #define GROUNDSTATION_NNG_URL "ipc:///tmp/groundstation.ipc"
@@ -24,25 +25,25 @@ static void request_shutdown(int signal_number) {
     keep_running = 0;
 }
 
-/* The first message byte is the content type and serves as the topic prefix, so subscribers can filter by type; an empty subscription receives every payload. */
-static ccsds_status_t publish_payload(nng_socket publisher, uint8_t content_type, const uint8_t *payload, size_t payload_length) {
+static ccsds_status_t publish_packet(nng_socket publisher, const groundstation_packet_t *packet) {
     nng_msg *message;
-    uint8_t *body;
+    size_t packet_size;
+    size_t written;
     int rv;
 
-    if (payload_length == SIZE_MAX) {
+    if (!groundstation_packet_valid(packet)) {
         return CCSDS_ERROR_RANGE;
     }
-    rv = nng_msg_alloc(&message, payload_length + 1U);
+    packet_size = groundstation_packet_size(packet->telemetry.content_type);
+    rv = nng_msg_alloc(&message, packet_size);
     if (rv != 0) {
         fprintf(stderr, "NNG message allocation failed: %s\n", nng_strerror(rv));
         return CCSDS_ERROR_CALLBACK;
     }
 
-    body = nng_msg_body(message);
-    body[0] = content_type;
-    if (payload_length != 0U) {
-        memcpy(body + 1U, payload, payload_length);
+    if (!groundstation_packet_serialize(packet, nng_msg_body(message), packet_size, &written)) {
+        nng_msg_free(message);
+        return CCSDS_ERROR_RANGE;
     }
 
     rv = nng_sendmsg(publisher, message, 0);
@@ -57,10 +58,7 @@ static ccsds_status_t publish_payload(nng_socket publisher, uint8_t content_type
 static ccsds_status_t forward_space_packet(const uint8_t *packet, size_t packet_length, void *user_context) {
     receive_context_t *context = user_context;
     lg_ccsds_profile_view_t view;
-    const uint8_t *payload;
-    size_t payload_length;
-    uint8_t content_type;
-    uint8_t *decoded_payload = NULL;
+    groundstation_packet_t outgoing = {0};
     ccsds_status_t status;
 
     status = lg_ccsds_profile_parse(packet, packet_length, &view);
@@ -69,44 +67,72 @@ static ccsds_status_t forward_space_packet(const uint8_t *packet, size_t packet_
         return CCSDS_OK;
     }
 
-    payload = view.payload;
-    payload_length = view.payload_length;
-    content_type = (uint8_t)view.metadata.content_type;
+    switch (view.metadata.content_type) {
+    case LG_CCSDS_CONTENT_RAW_TELEMETRY:
+        if (view.payload_length > sizeof(outgoing.telemetry.samples)) {
+            fprintf(stderr, "Telemetry exceeds shared packet capacity\n");
+            return CCSDS_OK;
+        }
+        outgoing.telemetry.content_type = GROUNDSTATION_PACKET_TELEMETRY;
+        outgoing.telemetry.sample_count = view.metadata.item_count;
+        outgoing.telemetry.samples_length = (uint32_t)view.payload_length;
+        memcpy(outgoing.telemetry.samples, view.payload, view.payload_length);
+        break;
 
-    if (view.metadata.content_type == LG_CCSDS_CONTENT_COMPRESSED_TELEMETRY) {
+    case LG_CCSDS_CONTENT_COMPRESSED_TELEMETRY: {
         size_t bytes_per_sample;
         size_t decoded_capacity;
         size_t decoded_length = 0U;
 
         status = ccsds_121_bytes_per_sample(&view.metadata.compression, &bytes_per_sample);
         if (status != CCSDS_OK || bytes_per_sample == 0U ||
-            view.metadata.item_count > SIZE_MAX / bytes_per_sample) {
-            fprintf(stderr, "Invalid CCSDS telemetry sample count or format\n");
+            view.metadata.item_count == 0U ||
+            view.metadata.item_count > sizeof(outgoing.telemetry.samples) / bytes_per_sample) {
+            fprintf(stderr, "Invalid telemetry sample format or sample count exceeds shared packet capacity\n");
             return CCSDS_OK;
         }
 
         decoded_capacity = (size_t)view.metadata.item_count * bytes_per_sample;
-        decoded_payload = malloc(decoded_capacity);
-        if (decoded_payload == NULL) {
-            fprintf(stderr, "Unable to allocate decompressed telemetry buffer\n");
-            return CCSDS_OK;
-        }
-
-        status = ccsds_121_decode(&view.metadata.compression, view.payload, view.payload_length, view.metadata.item_count, decoded_payload, decoded_capacity, &decoded_length);
+        status = ccsds_121_decode(&view.metadata.compression, view.payload, view.payload_length, view.metadata.item_count, outgoing.telemetry.samples, decoded_capacity, &decoded_length);
         if (status != CCSDS_OK) {
             fprintf(stderr, "Unable to decompress CCSDS telemetry: %s\n", ccsds_status_string(status));
-            free(decoded_payload);
             return CCSDS_OK;
         }
 
-        payload = decoded_payload;
-        payload_length = decoded_length;
-        content_type = (uint8_t)LG_CCSDS_CONTENT_RAW_TELEMETRY;
+        outgoing.telemetry.content_type = GROUNDSTATION_PACKET_TELEMETRY;
+        outgoing.telemetry.sample_count = view.metadata.item_count;
+        outgoing.telemetry.samples_length = (uint32_t)decoded_length;
+        outgoing.telemetry.bits_per_sample = view.metadata.compression.bits_per_sample;
+        outgoing.telemetry.signed_samples = view.metadata.compression.signed_samples;
+        break;
     }
 
-    status = publish_payload(context->publisher, content_type, payload, payload_length);
-    free(decoded_payload);
-    return status;
+    case LG_CCSDS_CONTENT_SSDV:
+        if (view.payload_length != sizeof(outgoing.ssdv.data)) {
+            fprintf(stderr, "Invalid SSDV packet length\n");
+            return CCSDS_OK;
+        }
+        outgoing.ssdv.content_type = GROUNDSTATION_PACKET_SSDV;
+        memcpy(outgoing.ssdv.data, view.payload, sizeof(outgoing.ssdv.data));
+        break;
+
+    case LG_CCSDS_CONTENT_COMMAND:
+        if (view.payload_length > sizeof(outgoing.command.commands)) {
+            fprintf(stderr, "Commands exceed shared packet capacity\n");
+            return CCSDS_OK;
+        }
+        outgoing.command.content_type = GROUNDSTATION_PACKET_COMMAND;
+        outgoing.command.command_count = view.metadata.item_count;
+        outgoing.command.commands_length = (uint32_t)view.payload_length;
+        memcpy(outgoing.command.commands, view.payload, view.payload_length);
+        break;
+
+    default:
+        fprintf(stderr, "Unsupported CCSDS content type\n");
+        return CCSDS_OK;
+    }
+
+    return publish_packet(context->publisher, &outgoing);
 }
 
 int main(void) {
