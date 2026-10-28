@@ -34,3 +34,7 @@ target_link_libraries(GroundStationCCSDS PRIVATE ccsds radio)
 add_executable(GroundStationSSDVEncoder slop/ssdv_encoder.c)
 target_include_directories(GroundStationSSDVEncoder PRIVATE lib/SSDV lib/simpl_SSDV)
 target_link_libraries(GroundStationSSDVEncoder PRIVATE SSDV)
+
+add_executable(GroundStationWrapPacket src/wrap.c)
+target_include_directories(GroundStationWrapPacket PRIVATE lib/ccsds/include lib/nng/include lib/radio)
+target_link_libraries(GroundStationWrapPacket PRIVATE ccsds radio nng)
