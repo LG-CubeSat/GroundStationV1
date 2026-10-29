@@ -1,32 +1,48 @@
-#include <stddef.h>
-#include <stdint.h>
+#include "serial.h"
+
 #include <string.h>
 
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
-#error "wire format is little-endian"
-#elif !defined(__BYTE_ORDER__) && !defined(_MSC_VER)
-#error "unknown compiler: can't confirm endianness"
-#endif
-
-#pragma pack(push, 1)
-typedef struct {
-    int32_t x;
-    int32_t y;
-} Point;
-
-typedef struct {
-    int32_t temp;
-    char text[8];
-} TempData;
-#pragma pack(pop)
-
-_Static_assert(sizeof(Point) == 8, "Point must be 8 bytes");
-_Static_assert(sizeof(TempData) == 12, "TempData must be 12 bytes");
-
-void serialize(const void *data, char *buffer, size_t size) {
-    memcpy(buffer, data, size);
+serial_status_t serialize(const void *data, size_t size, void *buffer, size_t capacity, size_t *written) {
+    if (written == NULL) {
+        return SERIAL_ERROR_NULL;
+    }
+    *written = 0U;
+    if (data == NULL || buffer == NULL) {
+        return SERIAL_ERROR_NULL;
+    }
+    if (size == 0U) {
+        return SERIAL_ERROR_SIZE;
+    }
+    if (capacity < size) {
+        return SERIAL_ERROR_BUFFER_TOO_SMALL;
+    }
+    memmove(buffer, data, size);
+    *written = size;
+    return SERIAL_OK;
 }
 
-void deserialize(const char *buffer, void *data, size_t size) {
-    memcpy(data, buffer, size);
+serial_status_t deserialize(const void *buffer, size_t length, void *data, size_t size) {
+    if (buffer == NULL || data == NULL) {
+        return SERIAL_ERROR_NULL;
+    }
+    if (size == 0U || length != size) {
+        return SERIAL_ERROR_SIZE;
+    }
+    memmove(data, buffer, size);
+    return SERIAL_OK;
+}
+
+const char *serial_status_string(serial_status_t status) {
+    switch (status) {
+    case SERIAL_OK:
+        return "success";
+    case SERIAL_ERROR_NULL:
+        return "null pointer";
+    case SERIAL_ERROR_SIZE:
+        return "invalid object size or message length";
+    case SERIAL_ERROR_BUFFER_TOO_SMALL:
+        return "output buffer too small";
+    default:
+        return "unknown serialization error";
+    }
 }

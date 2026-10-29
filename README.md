@@ -9,8 +9,8 @@ The ground station code will reside on a normal laptop and must control the ante
 - [ ] Packet Police
 - [x] Function Stubs - Recv
 - [x] Fill in Stub Implementations - Recv
-- [ ] Function Stubs - Send
-- [ ] Fill in Stub Implementations - Send
+- [x] Function Stubs - Send
+- [x] Fill in Stub Implementations - Send
 
 ### Ground Station UI
 - [ ] Install civetweb
@@ -29,6 +29,3 @@ The ground station code will reside on a normal laptop and must control the ante
 - [ ] Crash Recovery
 - [ ] Function Stubs
 - [ ] Fill in Stub Implementations
-
-## SSDV
-Currently, we have a extra sloppity-slop library called simpl_ssdv.h, which is for simplifying ssdv use. The main ssdv file is a decoder that parses a file, but in the futre the file part will get chopped off and it will get the data from the radio. SSDVEncoder is just a sloppity-slop test thing for SSDV. WILL be deleted in the future.
