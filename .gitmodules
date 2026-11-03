@@ -8,3 +8,6 @@
 [submodule "lib/libaec"]
 	path = lib/libaec
 	url = https://github.com/Deutsches-Klimarechenzentrum/libaec/
+[submodule "lib/civetweb"]
+	path = lib/civetweb
+	url = https://github.com/civetweb/civetweb.git
