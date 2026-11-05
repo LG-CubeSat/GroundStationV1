@@ -13,6 +13,7 @@
 #include "ccsds/ccsds.h"
 #include "groundstation_message.h"
 #include "radio.h"
+#include "serial.h"
 #include "../lib/SSDV/ssdv.h"
 
 #define RADIO_BUFFER_SIZE UINT16_MAX
@@ -32,11 +33,6 @@ static volatile sig_atomic_t keep_running = 1;
 static void request_shutdown(int signal_number) {
     (void)signal_number;
     keep_running = 0;
-}
-
-static int valid_payload(const void *data, size_t length) {
-    /* Field validation belongs here once shared application structs exist. */
-    return data != NULL && length > 0U && length <= GROUNDSTATION_PACKET_DATA_CAPACITY;
 }
 
 static void reset_image(receive_context_t *context) {
@@ -183,29 +179,21 @@ static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void 
         return CCSDS_OK;
     }
     if (view.total_length != length || view.header.has_secondary_header ||
-        view.header.sequence_flags != CCSDS_SEQUENCE_UNSEGMENTED ||
-        !valid_payload(view.data, view.data_length)) {
+        view.header.sequence_flags != CCSDS_SEQUENCE_UNSEGMENTED) {
         fprintf(stderr, "Dropping CCSDS packet with unexpected framing or payload length\n");
         return CCSDS_OK;
     }
-    switch (view.header.apid) {
-    case LG_CCSDS_APID_RAW_TELEMETRY:
-    case LG_CCSDS_APID_COMPRESSED_TELEMETRY:
-    case LG_CCSDS_APID_SSDV:
+    if (view.header.apid == LG_CCSDS_APID_SSDV) {
+        groundstation_ssdv_packet_t payload;
         if (view.header.type != CCSDS_PACKET_TYPE_TELEMETRY) {
-            fprintf(stderr, "Dropping telemetry APID with command packet type\n");
+            fprintf(stderr, "Dropping SSDV APID with command packet type\n");
             return CCSDS_OK;
         }
-        break;
-    case LG_CCSDS_APID_COMMAND:
-        if (view.header.type == CCSDS_PACKET_TYPE_COMMAND) break;
-    default:
-        fprintf(stderr, "Dropping unsupported CCSDS APID/type (%u/%u)\n",
-                (unsigned int)view.header.apid, (unsigned int)view.header.type);
-        return CCSDS_OK;
-    }
-    if (view.header.apid == LG_CCSDS_APID_SSDV) {
-        receive_ssdv(context, view.data, view.data_length);
+        if (deserialize_ssdv(view.data, view.data_length, &payload) != SERIAL_OK) {
+            fprintf(stderr, "Dropping SSDV payload of invalid size: %zu\n", view.data_length);
+            return CCSDS_OK;
+        }
+        receive_ssdv(context, payload.data, sizeof(payload.data));
         return CCSDS_OK;
     }
 
@@ -221,7 +209,7 @@ static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void 
 }
 
 static int send_command(nng_msg *message, uint16_t *sequence) {
-    uint8_t packet[CCSDS_SPACE_PACKET_MAX_TOTAL_SIZE];
+    uint8_t packet[CCSDS_SPACE_PACKET_PRIMARY_HEADER_SIZE + sizeof(groundstation_command_packet_t)];
     size_t packet_length;
     ccsds_space_packet_header_t header = {
         .type = CCSDS_PACKET_TYPE_COMMAND,
@@ -233,8 +221,9 @@ static int send_command(nng_msg *message, uint16_t *sequence) {
     ccsds_status_t status;
     int rv;
 
-    if (!valid_payload(nng_msg_body(message), nng_msg_len(message))) {
-        fprintf(stderr, "Dropping NNG command with invalid payload length: %zu\n", nng_msg_len(message));
+    if (nng_msg_len(message) != sizeof(groundstation_command_packet_t)) {
+        fprintf(stderr, "Dropping NNG command of size %zu; expected %zu-byte struct\n",
+                nng_msg_len(message), sizeof(groundstation_command_packet_t));
         return 0;
     }
     status = ccsds_space_packet_build(&header, nng_msg_body(message), nng_msg_len(message),
@@ -274,7 +263,8 @@ int main(void) {
     if ((rv = nng_listen(context.publisher, GROUNDSTATION_NNG_URL, NULL, 0)) != 0) goto nng_error;
     if ((rv = nng_pull0_open(&commands)) != 0) goto nng_error;
     commands_open = 1;
-    if ((rv = nng_socket_set_size(commands, NNG_OPT_RECVMAXSZ, GROUNDSTATION_PACKET_DATA_CAPACITY)) != 0)
+    if ((rv = nng_socket_set_size(commands, NNG_OPT_RECVMAXSZ,
+                                   sizeof(groundstation_command_packet_t))) != 0)
         goto nng_error;
     if ((rv = nng_listen(commands, GROUNDSTATION_COMMAND_NNG_URL, NULL, 0)) != 0) goto nng_error;
 
@@ -282,7 +272,7 @@ int main(void) {
     (void)signal(SIGTERM, request_shutdown);
     fprintf(stderr, "Received payloads: SUB %s\nCommands: PUSH %s\n",
             GROUNDSTATION_NNG_URL, GROUNDSTATION_COMMAND_NNG_URL);
-    fprintf(stderr, "SSDV images are saved as ssdv-*.jpg in the working directory\n");
+    fprintf(stderr, "SSDV images are decoded locally and saved as ssdv-*.jpg\n");
 
     while (keep_running) {
         int did_work = 0;

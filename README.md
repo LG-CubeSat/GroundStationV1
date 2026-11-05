@@ -13,11 +13,12 @@ The ground station code will reside on a normal laptop and must control the ante
 - [x] Fill in Stub Implementations - Send
 
 ### Ground Station UI
-- [ ] Install civetweb
-- [ ] NNG Send / Recv
-- [ ] Civetweb stuff
-- [ ] Function Stubs
-- [ ] Fill in Stub Implementations
+- [x] Install civetweb
+- [x] NNG Send / Recv
+- [x] Civetweb stuff
+- [x] Function Stubs
+- [x] Fill in Stub Implementations
+- [ ] HTML File Auto-embedder
 - [ ] The Eyecandy
 
 ### Ground Station Backup

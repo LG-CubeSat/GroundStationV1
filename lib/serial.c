@@ -46,3 +46,33 @@ const char *serial_status_string(serial_status_t status) {
         return "unknown serialization error";
     }
 }
+
+serial_status_t serialize_telemetry(const groundstation_telemetry_packet_t *value,
+                                  void *buffer, size_t capacity, size_t *written) {
+    return serialize(value, sizeof(*value), buffer, capacity, written);
+}
+
+serial_status_t deserialize_telemetry(const void *buffer, size_t length,
+                                    groundstation_telemetry_packet_t *value) {
+    return deserialize(buffer, length, value, sizeof(*value));
+}
+
+serial_status_t serialize_command(const groundstation_command_packet_t *value,
+                                void *buffer, size_t capacity, size_t *written) {
+    return serialize(value, sizeof(*value), buffer, capacity, written);
+}
+
+serial_status_t deserialize_command(const void *buffer, size_t length,
+                                  groundstation_command_packet_t *value) {
+    return deserialize(buffer, length, value, sizeof(*value));
+}
+
+serial_status_t serialize_ssdv(const groundstation_ssdv_packet_t *value,
+                             void *buffer, size_t capacity, size_t *written) {
+    return serialize(value, sizeof(*value), buffer, capacity, written);
+}
+
+serial_status_t deserialize_ssdv(const void *buffer, size_t length,
+                               groundstation_ssdv_packet_t *value) {
+    return deserialize(buffer, length, value, sizeof(*value));
+}
