@@ -11,3 +11,6 @@
 [submodule "lib/civetweb"]
 	path = lib/civetweb
 	url = https://github.com/civetweb/civetweb.git
+[submodule "lib/radio"]
+	path = lib/radio
+	url = https://github.com/LG-CubeSat/RadioHandler
