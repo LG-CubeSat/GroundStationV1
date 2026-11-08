@@ -16,8 +16,6 @@
 #include "serial.h"
 #include "../lib/SSDV/ssdv.h"
 
-#define RADIO_BUFFER_SIZE UINT16_MAX
-
 typedef struct {
     nng_socket publisher;
     ssdv_t decoder;
@@ -167,45 +165,34 @@ static void receive_ssdv(receive_context_t *context, const uint8_t *data, size_t
     }
 }
 
-static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void *user_context) {
-    receive_context_t *context = user_context;
-    ccsds_space_packet_view_t view;
+/* packet is one whole lg profile ccsds packet from radio_receive_packet (crc already checked) */
+static void receive_packet(receive_context_t *context, const uint8_t *packet, size_t length) {
+    lg_ccsds_profile_view_t view;
     nng_msg *message;
     int rv;
-    ccsds_status_t status = ccsds_space_packet_parse(packet, length, &view);
+    ccsds_status_t status = lg_ccsds_profile_parse(packet, length, &view);
 
     if (status != CCSDS_OK) {
         fprintf(stderr, "Dropping invalid CCSDS packet: %s\n", ccsds_status_string(status));
-        return CCSDS_OK;
+        return;
     }
-    if (view.total_length != length || view.header.has_secondary_header ||
-        view.header.sequence_flags != CCSDS_SEQUENCE_UNSEGMENTED) {
-        fprintf(stderr, "Dropping CCSDS packet with unexpected framing or payload length\n");
-        return CCSDS_OK;
+    if (view.metadata.content_type == LG_CCSDS_CONTENT_SSDV) {
+        receive_ssdv(context, view.payload, view.payload_length);
+        return;
     }
-    if (view.header.apid == LG_CCSDS_APID_SSDV) {
-        groundstation_ssdv_packet_t payload;
-        if (view.header.type != CCSDS_PACKET_TYPE_TELEMETRY) {
-            fprintf(stderr, "Dropping SSDV APID with command packet type\n");
-            return CCSDS_OK;
-        }
-        if (deserialize_ssdv(view.data, view.data_length, &payload) != SERIAL_OK) {
-            fprintf(stderr, "Dropping SSDV payload of invalid size: %zu\n", view.data_length);
-            return CCSDS_OK;
-        }
-        receive_ssdv(context, payload.data, sizeof(payload.data));
-        return CCSDS_OK;
+    if (view.metadata.content_type == LG_CCSDS_CONTENT_COMMAND) {
+        fprintf(stderr, "Dropping command packet, ground station doesn't take commands\n");
+        return;
     }
 
-    rv = nng_msg_alloc(&message, view.data_length);
+    // telemetry goes out to the ui over nng
+    rv = nng_msg_alloc(&message, view.payload_length);
     if (rv == 0) {
-        memcpy(nng_msg_body(message), view.data, view.data_length);
+        memcpy(nng_msg_body(message), view.payload, view.payload_length);
         rv = nng_sendmsg(context->publisher, message, NNG_FLAG_NONBLOCK);
         if (rv != 0) nng_msg_free(message);
     }
     if (rv != 0) fprintf(stderr, "Publishing received payload failed: %s\n", nng_strerror(rv));
-
-    return CCSDS_OK;
 }
 
 static int send_command(nng_msg *message, uint16_t *sequence) {
@@ -242,22 +229,14 @@ static int send_command(nng_msg *message, uint16_t *sequence) {
 }
 
 int main(void) {
-    uint8_t radio_buffer[RADIO_BUFFER_SIZE];
-    uint8_t packet_storage[CCSDS_SPACE_PACKET_MAX_TOTAL_SIZE];
-    ccsds_stream_parser_t parser;
+    uint8_t radio_packet[RADIO_MAX_PACKET_SIZE];
     receive_context_t context = {.publisher = NNG_SOCKET_INITIALIZER};
     nng_socket commands = NNG_SOCKET_INITIALIZER;
     int publisher_open = 0, commands_open = 0;
     int result = EXIT_FAILURE, rv;
     uint16_t sequence = 0;
     nng_time radio_retry_at = 0;
-    ccsds_status_t status;
 
-    status = ccsds_stream_parser_init(&parser, packet_storage, sizeof(packet_storage));
-    if (status != CCSDS_OK) {
-        fprintf(stderr, "Unable to initialize CCSDS parser: %s\n", ccsds_status_string(status));
-        goto cleanup;
-    }
     if ((rv = nng_pub0_open(&context.publisher)) != 0) goto nng_error;
     publisher_open = 1;
     if ((rv = nng_listen(context.publisher, GROUNDSTATION_NNG_URL, NULL, 0)) != 0) goto nng_error;
@@ -279,20 +258,14 @@ int main(void) {
         nng_msg *message = NULL;
 
         if (nng_clock() >= radio_retry_at) {
-            int received = radio_receive(radio_buffer, (uint16_t)sizeof(radio_buffer));
-            if (received < 0 || (size_t)received > sizeof(radio_buffer)) {
-                fprintf(stderr, "Radio receive failed or returned invalid length (%d)\n", received);
-                ccsds_stream_parser_reset(&parser);
+            // radio_receive_packet hands back one whole checked packet at a time
+            int received = radio_receive_packet(radio_packet, (uint16_t)sizeof(radio_packet));
+            if (received < 0) {
+                fprintf(stderr, "Radio receive failed (%d)\n", received);
                 radio_retry_at = nng_clock() + 250U;
             } else if (received > 0) {
-                size_t delivered = 0U;
                 did_work = 1;
-                status = ccsds_stream_parser_feed(&parser, radio_buffer, (size_t)received,
-                                                  receive_packet, &context, &delivered);
-                if (status != CCSDS_OK) {
-                    fprintf(stderr, "CCSDS stream parse failed: %s\n", ccsds_status_string(status));
-                    ccsds_stream_parser_reset(&parser);
-                }
+                receive_packet(&context, radio_packet, (size_t)received);
             }
         }
 
