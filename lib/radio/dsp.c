@@ -56,3 +56,29 @@ int32_t dsp_init(dsp_state_t *state, double sample_rate_hz, double bandwidth_hz,
     return 0; 
 
 }
+
+int32_t dsp_process(dsp_state_t *state, float complex *samples, size_t count){
+
+    if (state == NULL) return -1;
+    if (state->tap_count < 3 || state->tap_count > DSP_MAX_TAPS || state->tap_count % 2 == 0) return -2;
+    if (count == 0) return 0;
+    if (samples == NULL) return -3;
+
+    for (size_t i = 0; i < count; i++){
+        for (size_t j = (state->tap_count - 1); j > 0; j--){
+            state->history[j] = state->history[j - 1];
+        }
+        state->history[0] = samples[i];
+
+        float complex accumulator = 0;
+        for (size_t j = 0; j < state->tap_count; j++){
+            accumulator += state->fir_coefficients[j] * state->history[j];
+        }
+
+        samples[i] = accumulator;
+
+    }
+
+    return 0;
+
+}

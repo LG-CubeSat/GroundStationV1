@@ -7,10 +7,10 @@ int main(void) {
 
     dsp_state_t test_struct = {0};
     
-    int32_t status = dsp_init(&test_struct, 1000, 100, 5, 150);
+    int32_t init_status = dsp_init(&test_struct, 1000, 100, 5, 150);
 
-    if (status != 0) {
-        printf("Error Code: %" PRId32 "\n", status);
+    if (init_status != 0) {
+        printf("Error Code: %" PRId32 "\n", init_status);
         return -1;
     }
     else {
@@ -72,8 +72,6 @@ int main(void) {
                 printf("Coefficient changed at index %zu\n", i);
                 return -11;
             }
-        }
-        for (size_t i = 0; i < DSP_MAX_TAPS; i++){
             if (test_struct.history[i] != successful.history[i]){
                 printf("History changed at index %zu\n", i);
                 return -12;
@@ -81,10 +79,22 @@ int main(void) {
         }
         
 
-        printf("Success!\n");
-        return 0;
+        printf("Init Success!\n");
+
     }
 
+    dsp_state_t impulse_test = {0};
+
+    int32_t int_process_status = dsp_init(&impulse_test, 1000, 100, 5, 150);
+    if (int_process_status != 0) return int_process_status;
+
+    float complex test_samples[] = {1.0, 0, 0, 0, 0, 0};
+    
+    int32_t process_status = dsp_process(&impulse_test, test_samples, sizeof(test_samples) / sizeof(test_samples[0]));
+
+    for (size_t i = 0; i < impulse_test.tap_count; i++){
+        
+    }
 
 }
 
