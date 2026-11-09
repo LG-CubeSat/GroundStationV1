@@ -11,3 +11,6 @@
 [submodule "lib/civetweb"]
 	path = lib/civetweb
 	url = https://github.com/civetweb/civetweb.git
+[submodule "lib/--force"]
+	path = lib/curl
+	url = https://github.com/curl/curl
