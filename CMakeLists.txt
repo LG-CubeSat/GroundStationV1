@@ -6,6 +6,7 @@ set(NNG_TESTS OFF CACHE BOOL "Build NNG tests" FORCE)
 add_subdirectory(lib/nng)
 add_subdirectory(lib/radio)
 add_subdirectory(lib/ccsds)
+find_package(OpenSSL REQUIRED)
 add_subdirectory(lib/curl)
 
 set(CIVETWEB_BUILD_TESTING OFF CACHE BOOL "Build CivetWeb tests")
@@ -36,6 +37,9 @@ target_link_libraries(GSEyecandy PRIVATE nng civetweb-c-library GroundStationSer
 # Backup
 add_executable(GSBackup src/backup.c)
 target_compile_features(GSBackup PRIVATE c_std_11)
+if(TARGET libcurl_static)
+    target_include_directories(libcurl_static BEFORE PRIVATE "${OPENSSL_INCLUDE_DIR}")
+endif()
 target_link_libraries(GSBackup PRIVATE nng GroundStationSerial CURL::libcurl)
 
 # Test Slop
