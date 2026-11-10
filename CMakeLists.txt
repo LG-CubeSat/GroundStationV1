@@ -4,8 +4,13 @@ project(GroundStation LANGUAGES C)
 # Libraries
 set(NNG_TESTS OFF CACHE BOOL "Build NNG tests" FORCE)
 add_subdirectory(lib/nng)
-add_subdirectory(lib/ccsds) # before radio so RadioHandler uses this ccsds instead of its own copy
 add_subdirectory(lib/radio)
+add_subdirectory(lib/ccsds)
+find_package(OpenSSL REQUIRED)
+add_subdirectory(lib/curl)
+if(TARGET libcurl_static)
+    target_include_directories(libcurl_static BEFORE PRIVATE "${OPENSSL_INCLUDE_DIR}")
+endif()
 
 set(CIVETWEB_BUILD_TESTING OFF CACHE BOOL "Build CivetWeb tests")
 set(CIVETWEB_ENABLE_SERVER_EXECUTABLE OFF CACHE BOOL "Build the standalone CivetWeb server")
@@ -24,13 +29,18 @@ target_compile_features(GroundStationSerial PUBLIC c_std_11)
 # Prod Executables
 add_executable(GSMain src/main.c)
 target_compile_features(GSMain PRIVATE c_std_11)
-target_include_directories(GSMain PRIVATE lib/ccsds/include lib/nng/include)
-target_link_libraries(GSMain PRIVATE ccsds RadioHandler nng GroundStationSerial SSDV)
+target_include_directories(GSMain PRIVATE lib/ccsds/include lib/nng/include lib/radio)
+target_link_libraries(GSMain PRIVATE ccsds radio nng GroundStationSerial SSDV)
 
 # Web executable uses NNG and CivetWeb libraries
 add_executable(GSEyecandy src/web.c)
 target_compile_features(GSEyecandy PRIVATE c_std_11)
 target_link_libraries(GSEyecandy PRIVATE nng civetweb-c-library GroundStationSerial)
+
+# Backup
+add_executable(GSBackup src/backup.c)
+target_compile_features(GSBackup PRIVATE c_std_11)
+target_link_libraries(GSBackup PRIVATE nng GroundStationSerial CURL::libcurl)
 
 # Test Slop
 add_executable(GSTest src/test.c)

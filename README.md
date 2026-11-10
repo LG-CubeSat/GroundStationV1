@@ -22,11 +22,10 @@ The ground station code will reside on a normal laptop and must control the ante
 - [ ] The Eyecandy
 
 ### Ground Station Backup
-- [ ] NNG Send / Recv
-- [ ] CBOR Encoding / Decoding
-- [ ] Pretty printing to a file
+- [x] NNG Send / Recv
+- [x] Pretty printing to a file
 - [ ] Tar Zipping
-- [ ] Uploading old ones to internet
+- [x] Uploading old ones to internet
 - [ ] Crash Recovery
 - [ ] Function Stubs
 - [ ] Fill in Stub Implementations
