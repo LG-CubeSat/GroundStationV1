@@ -1,6 +1,14 @@
 #include "dsp.h"
 #include <math.h>
 
+/*
+
+This assumes usable finite samples. It does not detect and deal with invalid, nonfinite samples.
+No capture/LoRa-decoder integration yet.
+No demonstrated improvement in real packet reception yet.
+
+*/
+
 static int32_t dsp_design_lowpass(float filter_weights[], size_t weight_capacity, size_t weight_count, double sample_rate_hz, double cutoff_frequency_hz){
     if (filter_weights == NULL) return -1;
     if (weight_count % 2 == 0 || weight_count < 3) return -2;
@@ -85,9 +93,9 @@ int32_t dsp_process(dsp_state_t *state, float complex *samples, size_t count){
 
 int32_t dsp_shift(dsp_state_t *state, float complex *samples, size_t count, float frequency_offset_hz){
 
-    if (state == NULL) return -1;
-    if (!isfinite(state->sample_rate_hz)) return -2;
-    if (state->sample_rate_hz <= 0) return -3;
+    if (state == NULL) return -1;                            
+    if (!isfinite(state->sample_rate_hz)) return -2;            
+    if (state->sample_rate_hz <= 0) return -3;                  
     if (!isfinite(frequency_offset_hz)) return -4;
     if (!isfinite(state->shift_phase)) return -5;
     if (count == 0) return 0;

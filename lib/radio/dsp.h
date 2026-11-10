@@ -3,7 +3,17 @@
 
 /*
 Code for signal processing for the radio.
-Pure math, no hardware
+Pure math, no hardware (doesn't connect to real radio yet)
+
+Units: Hz, radians, and complex samples—not bytes.
+Zero means success; negative values mean errors.
+dsp_init must succeed before processing.
+Processing modifies the supplied array.
+State must persist between blocks.
+One state belongs to one stream; simultaneous calls on the same state are not supported.
+Positive shift offsets move frequencies downward.
+Bandwidth_hz currently only stores information, it does not automatically choose or verify the filter’s passband.
+
 */
 
 #include <complex.h>

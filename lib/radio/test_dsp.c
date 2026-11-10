@@ -318,6 +318,163 @@ int main(void) {
 
     printf("Tone test 300hz success\n");
 
+    // Shift test 
+
+    dsp_state_t shift_test = {0};
+    int32_t shift_test_init_status = dsp_init(&shift_test, 1000, 100, 65, 150);
+    if (shift_test_init_status != 0){
+        printf("Shift test init failed with error code: %" PRId32 "\n", shift_test_init_status);
+        return -42;
+    }
+
+    float complex shift_tone_test_samples[1000];
+
+    float shift_tone_test_frequency_hz = 50;
+
+    for (size_t i = 0; i < 1000; i++){
+        double shift_tone_test_angle = 2 * pi * shift_tone_test_frequency_hz * i / 1000;
+        shift_tone_test_samples[i] = cos(shift_tone_test_angle) + _Complex_I * sin(shift_tone_test_angle);
+    }
+
+    int32_t shift_test_shift_status = dsp_shift(&shift_test, shift_tone_test_samples, 1000, 50);
+    if (shift_test_shift_status != 0){
+        printf("Shift tone test shift failed with error code: %" PRId32 "\n", shift_test_shift_status);
+        return -43;
+    }
+
+    for (size_t i = 0; i < 1000; i++){
+        float shift_test_diff = cabsf(shift_tone_test_samples[i] - 1.0f);
+        if (!isfinite(shift_test_diff)) {
+            printf("Shift tone test diff is not finite\n");
+            return -44;
+        }
+        if (shift_test_diff > 0.00001){
+            printf("Shift test diff too large on index %zu\n", i);
+            return -45;
+        }
+    }
+
+    printf("Shift tone test success!\n");
+
+    // Shift test with negative frequency offset
+
+    dsp_state_t shift_test_neg = {0};
+    int32_t shift_test_neg_init_status = dsp_init(&shift_test_neg, 1000, 100, 65, 150);
+    if (shift_test_neg_init_status != 0){
+        printf("Shift test neg init failed with error code: %" PRId32 "\n", shift_test_neg_init_status);
+        return -46;
+    }
+
+    float complex shift_test_neg_samples[1000];
+    float shift_test_neg_frequency_hz = -50;
+
+    for (size_t i = 0; i < 1000; i++){
+        double shift_test_neg_angle = 2 * pi * shift_test_neg_frequency_hz * i / 1000;
+        shift_test_neg_samples[i] = cos(shift_test_neg_angle) + _Complex_I * sin(shift_test_neg_angle);
+    }
+
+    int32_t shift_test_neg_shift_status = dsp_shift(&shift_test_neg, shift_test_neg_samples, 1000, shift_test_neg_frequency_hz);
+    if (shift_test_neg_shift_status != 0){
+        printf("Shift tone test neg shift failed with error code: %" PRId32 "\n", shift_test_neg_shift_status);
+        return -47;
+    }
+    for (size_t i = 0; i < 1000; i++){
+        float shift_test_neg_diff = cabsf(shift_test_neg_samples[i] - 1.0f);
+        if (!isfinite(shift_test_neg_diff)) {
+            printf("Shift neg test diff is not finite\n");
+            return -48;
+        }
+        if (shift_test_neg_diff > 0.00001){
+            printf("Shift neg test diff too large on index %zu\n", i);
+            return -49;
+        }
+    }
+
+    printf("Negative shift test succeeded\n");
+
+    // Shift test for phase continuity across calls
+
+    dsp_state_t shift_test_one = {0};
+    dsp_state_t shift_test_two = {0};
+
+    int32_t shift_test_one_init_status = dsp_init(&shift_test_one, 1000, 100, 65, 150);
+    if (shift_test_one_init_status != 0){
+        printf("Shift test one init failed with error code: %" PRId32 "\n", shift_test_one_init_status);
+        return -50;
+    }
+    int32_t shift_test_two_init_status = dsp_init(&shift_test_two, 1000, 100, 65, 150);
+    if (shift_test_two_init_status != 0){
+        printf("Shift test two init failed with error code: %" PRId32 "\n", shift_test_two_init_status);
+        return -50;
+    }
+
+    float complex shift_test_one_samples[1000];
+    float complex shift_test_two_samples[1000];
+
+    float shift_test_split_frequency_hz = 50;
+
+    for (size_t i = 0; i < 1000; i++){
+        double shift_test_one_angle = 2 * pi * shift_test_split_frequency_hz * i / 1000;
+        shift_test_one_samples[i] = cos(shift_test_one_angle) + _Complex_I * sin(shift_test_one_angle);
+    }
+    for (size_t i = 0; i < 1000; i++){
+        double shift_test_two_angle = 2 * pi * shift_test_split_frequency_hz * i / 1000;
+        shift_test_two_samples[i] = cos(shift_test_two_angle) + _Complex_I * sin(shift_test_two_angle);
+    }
+
+    int32_t shift_test_shift_one_status = dsp_shift(&shift_test_one, shift_test_one_samples, 1000, shift_test_split_frequency_hz);
+    if (shift_test_shift_one_status != 0){
+        printf("Shift test block one failed to shift with code: %" PRId32 "\n", shift_test_shift_one_status);
+        return -51;
+    }
+    int32_t shift_test_shift_two1_status = dsp_shift(&shift_test_two, shift_test_two_samples, 333, shift_test_split_frequency_hz);
+    if (shift_test_shift_two1_status != 0){
+        printf("Shift test block two, part 1 failed to shift with code: %" PRId32 "\n", shift_test_shift_two1_status);
+        return -52;
+    }
+    int32_t shift_test_shift_two2_status = dsp_shift(&shift_test_two, &shift_test_two_samples[333], 667, shift_test_split_frequency_hz);
+    if (shift_test_shift_two2_status != 0){
+        printf("Shift test block two, part 2 failed to shift with code: %" PRId32 "\n", shift_test_shift_two2_status);
+        return -53;
+    }
+
+    for (size_t i = 0; i < 1000; i++){
+        double sep_block_shift_test_diff = cabsf(shift_test_one_samples[i] - shift_test_two_samples[i]);
+        if (!isfinite(sep_block_shift_test_diff)) {
+            printf("diff is not finite at index %zu\n", i);
+            return -54;
+        }
+        if (sep_block_shift_test_diff > 0.00001){
+            printf("Diff is too large and index %zu\n", i);
+            return -55;
+        }
+
+        double sep_block_diff_from_one1 = cabsf(shift_test_one_samples[i] - 1.0f);
+
+        if (!isfinite(sep_block_diff_from_one1)) {
+            printf("Sample set one diff from 1 is not finite at index %zu\n", i);
+            return -56;
+        }
+        if (sep_block_diff_from_one1 > 0.00001) {
+            printf("Sample set one diff from 1 is too large at index %zu\n", i);
+            return -57;
+        }
+
+        double sep_block_diff_from_one2 = cabsf(shift_test_two_samples[i] - 1.0f);
+
+        if (!isfinite(sep_block_diff_from_one2)) {
+            printf("Sample set two diff from 1 is not finite at index %zu\n", i);
+            return -58;
+        }
+        if (sep_block_diff_from_one2 > 0.00001) {
+            printf("Sample set two diff from 1 is too large at index %zu\n", i);
+            return -59;
+        }
+
+    }
+
+    printf("Phase continuity test success\n");
+
     return 0;
 
 }
