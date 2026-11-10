@@ -82,3 +82,29 @@ int32_t dsp_process(dsp_state_t *state, float complex *samples, size_t count){
     return 0;
 
 }
+
+int32_t dsp_shift(dsp_state_t *state, float complex *samples, size_t count, float frequency_offset_hz){
+
+    if (state == NULL) return -1;
+    if (!isfinite(state->sample_rate_hz)) return -2;
+    if (state->sample_rate_hz <= 0) return -3;
+    if (!isfinite(frequency_offset_hz)) return -4;
+    if (!isfinite(state->shift_phase)) return -5;
+    if (count == 0) return 0;
+    if (samples == NULL) return -6;
+
+    const double pi = 3.141592653589793;
+
+    double reduced_offset = remainder(frequency_offset_hz, state->sample_rate_hz);
+    double phase_increment = (reduced_offset / state->sample_rate_hz) * 2 * pi;
+
+    for (size_t i = 0; i < count; i++){
+        float complex rotation = cos(state->shift_phase) - _Complex_I * sin(state->shift_phase);
+        samples[i] *= rotation;
+        state->shift_phase += phase_increment;
+        state->shift_phase = remainder(state->shift_phase, 2 * pi);
+    }
+
+    return 0;
+
+}
