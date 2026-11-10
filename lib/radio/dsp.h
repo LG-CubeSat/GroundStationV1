@@ -25,15 +25,15 @@ Bandwidth_hz currently only stores information, it does not automatically choose
 typedef struct {                                
     double sample_rate_hz;                                      
     double bandwidth_hz;
-    float fir_coefficients[DSP_MAX_TAPS];
-    size_t tap_count;
-    float complex history[DSP_MAX_TAPS];
+    float fir_coefficients[DSP_MAX_TAPS];  // filter weights
+    size_t tap_count;  // number of weights in filter
+    float complex history[DSP_MAX_TAPS];  // sample history
     float agc_gain;
-    double shift_phase;
+    double shift_phase;  
 } dsp_state_t;
 
-int32_t dsp_init(dsp_state_t *state, double sample_rate_hz, double bandwidth_hz, size_t tap_count, double cutoff_frequency_hz);
-int32_t dsp_process(dsp_state_t *state, float complex *samples, size_t count);
-int32_t dsp_shift(dsp_state_t *state, float complex *samples, size_t count, float frequency_offset_hz);
+int32_t dsp_init(dsp_state_t *state, double sample_rate_hz, double bandwidth_hz, size_t tap_count, double cutoff_frequency_hz); // Initialize dsp state and generate weights
+int32_t dsp_process(dsp_state_t *state, float complex *samples, size_t count); // Process samples with generated weights
+int32_t dsp_shift(dsp_state_t *state, float complex *samples, size_t count, float frequency_offset_hz); // Correct frequency offsets
 
 #endif

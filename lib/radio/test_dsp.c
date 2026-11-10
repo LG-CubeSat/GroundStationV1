@@ -3,6 +3,9 @@
 #include <inttypes.h>
 #include <math.h> 
 
+// pretty unorganized, but there are comments separating the different tests
+// soon we need to make functions for each one
+
 int main(void) {
 
     // Test for dsp_init

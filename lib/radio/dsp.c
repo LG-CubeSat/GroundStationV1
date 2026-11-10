@@ -69,7 +69,7 @@ int32_t dsp_process(dsp_state_t *state, float complex *samples, size_t count){
 
     if (state == NULL) return -1;
     if (state->tap_count < 3 || state->tap_count > DSP_MAX_TAPS || state->tap_count % 2 == 0) return -2;
-    if (count == 0) return 0;
+    if (count == 0) return 0; // return 0 when there are no samples to process
     if (samples == NULL) return -3;
 
     for (size_t i = 0; i < count; i++){
@@ -98,7 +98,7 @@ int32_t dsp_shift(dsp_state_t *state, float complex *samples, size_t count, floa
     if (state->sample_rate_hz <= 0) return -3;                  
     if (!isfinite(frequency_offset_hz)) return -4;
     if (!isfinite(state->shift_phase)) return -5;
-    if (count == 0) return 0;
+    if (count == 0) return 0;  // return 0 when there are no samples to process
     if (samples == NULL) return -6;
 
     const double pi = 3.141592653589793;
