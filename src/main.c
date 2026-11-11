@@ -195,17 +195,7 @@ static void receive_packet(receive_context_t *context, const uint8_t *packet, si
     if (rv != 0) fprintf(stderr, "Publishing received payload failed: %s\n", nng_strerror(rv));
 }
 
-static int send_command(nng_msg *message, uint16_t *sequence) {
-    uint8_t packet[CCSDS_SPACE_PACKET_PRIMARY_HEADER_SIZE + sizeof(groundstation_command_packet_t)];
-    size_t packet_length;
-    ccsds_space_packet_header_t header = {
-        .type = CCSDS_PACKET_TYPE_COMMAND,
-        .has_secondary_header = false,
-        .apid = LG_CCSDS_APID_COMMAND,
-        .sequence_flags = CCSDS_SEQUENCE_UNSEGMENTED,
-        .sequence_count = *sequence
-    };
-    ccsds_status_t status;
+static int send_command(nng_msg *message) {
     int rv;
 
     if (nng_msg_len(message) != sizeof(groundstation_command_packet_t)) {
@@ -213,18 +203,11 @@ static int send_command(nng_msg *message, uint16_t *sequence) {
                 nng_msg_len(message), sizeof(groundstation_command_packet_t));
         return 0;
     }
-    status = ccsds_space_packet_build(&header, nng_msg_body(message), nng_msg_len(message),
-                                      packet, sizeof(packet), &packet_length);
-    if (status != CCSDS_OK) {
-        fprintf(stderr, "Unable to build CCSDS command: %s\n", ccsds_status_string(status));
-        return -1;
-    }
-    rv = radio_send(packet, packet_length);
+    rv = radio_send_command(nng_msg_body(message), nng_msg_len(message));
     if (rv < 0) {
         fprintf(stderr, "Radio send failed (%d); command transmission is uncertain\n", rv);
         return -1;
     }
-    *sequence = (uint16_t)((*sequence + 1U) & CCSDS_SPACE_PACKET_MAX_SEQUENCE_COUNT);
     return 0;
 }
 
@@ -234,7 +217,6 @@ int main(void) {
     nng_socket commands = NNG_SOCKET_INITIALIZER;
     int publisher_open = 0, commands_open = 0;
     int result = EXIT_FAILURE, rv;
-    uint16_t sequence = 0;
     nng_time radio_retry_at = 0;
 
     if ((rv = nng_pub0_open(&context.publisher)) != 0) goto nng_error;
@@ -271,7 +253,7 @@ int main(void) {
 
         rv = nng_recvmsg(commands, &message, NNG_FLAG_NONBLOCK);
         if (rv == 0) {
-            int sent = send_command(message, &sequence);
+            int sent = send_command(message);
             nng_msg_free(message);
             if (sent != 0) goto cleanup;
             did_work = 1;

@@ -31,8 +31,3 @@ target_link_libraries(GSMain PRIVATE ccsds RadioHandler nng GroundStationSerial 
 add_executable(GSEyecandy src/web.c)
 target_compile_features(GSEyecandy PRIVATE c_std_11)
 target_link_libraries(GSEyecandy PRIVATE nng civetweb-c-library GroundStationSerial)
-
-# Test Slop
-add_executable(GSTest src/test.c)
-target_compile_features(GSTest PRIVATE c_std_11)
-target_link_libraries(GSTest PRIVATE nng ccsds GroundStationSerial civetweb-c-library)
