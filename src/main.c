@@ -16,6 +16,8 @@
 #include "serial.h"
 #include "../lib/SSDV/ssdv.h"
 
+#define TELEMETRY_MAX_DECODED 4096 // biggest decompressed telemetry we'll accept
+
 typedef struct {
     nng_socket publisher;
     ssdv_t decoder;
@@ -101,16 +103,16 @@ static void finish_image(receive_context_t *context, int recovered) {
 }
 
 static void receive_ssdv(receive_context_t *context, const uint8_t *data, size_t length) {
-    uint8_t packet[SSDV_PKT_SIZE];
+    uint8_t packet[SSDV_PKT_SIZE]; // ssdv's max size, flight packets only use the first 214
     ssdv_packet_info_t info;
     int status;
 
-    if (length != sizeof(packet)) {
+    if (length != LG_CCSDS_SSDV_PACKET_SIZE) {
         fprintf(stderr, "Dropping SSDV payload of invalid size: %zu\n", length);
         return;
     }
-    memcpy(packet, data, sizeof(packet));
-    if (ssdv_dec_is_packet(packet, sizeof(packet), NULL) != SSDV_OK) {
+    memcpy(packet, data, LG_CCSDS_SSDV_PACKET_SIZE);
+    if (ssdv_dec_is_packet(packet, LG_CCSDS_SSDV_PACKET_SIZE, NULL) != SSDV_OK) {
         fprintf(stderr, "Dropping invalid SSDV packet\n");
         return;
     }
@@ -131,7 +133,7 @@ static void receive_ssdv(receive_context_t *context, const uint8_t *data, size_t
 
         finish_image(context, 1);
         reset_image(context);
-        if (ssdv_dec_init(&context->decoder, SSDV_PKT_SIZE) != SSDV_OK) {
+        if (ssdv_dec_init(&context->decoder, LG_CCSDS_SSDV_PACKET_SIZE) != SSDV_OK) {
             fprintf(stderr, "Unable to initialize SSDV decoder\n");
             return;
         }
@@ -185,10 +187,28 @@ static void receive_packet(receive_context_t *context, const uint8_t *packet, si
         return;
     }
 
+    const uint8_t *payload = view.payload;
+    size_t payload_length = view.payload_length;
+    uint8_t decoded[TELEMETRY_MAX_DECODED];
+
+    // the ui only understands raw telemetry, so decompress before publishing
+    if (view.metadata.content_type == LG_CCSDS_CONTENT_COMPRESSED_TELEMETRY) {
+        size_t decoded_length = 0;
+        status = ccsds_121_decode(&view.metadata.compression, view.payload, view.payload_length,
+                                  view.metadata.item_count, decoded, sizeof(decoded), &decoded_length);
+        if (status != CCSDS_OK) {
+            fprintf(stderr, "Dropping compressed telemetry that won't decode: %s\n",
+                    ccsds_status_string(status));
+            return;
+        }
+        payload = decoded;
+        payload_length = decoded_length;
+    }
+
     // telemetry goes out to the ui over nng
-    rv = nng_msg_alloc(&message, view.payload_length);
+    rv = nng_msg_alloc(&message, payload_length);
     if (rv == 0) {
-        memcpy(nng_msg_body(message), view.payload, view.payload_length);
+        memcpy(nng_msg_body(message), payload, payload_length);
         rv = nng_sendmsg(context->publisher, message, NNG_FLAG_NONBLOCK);
         if (rv != 0) nng_msg_free(message);
     }
