@@ -15,7 +15,6 @@
 
 #define BACKUP_ADDRESS "telemetry_backup.bin"
 #define COPY_ADDRESS "telemetry_copy.bin"
-#define TEMP_ADDRESS "telemetry_temp.bin"
 
 // #define WEB_SERVER_ADDRESS "127.0.0.1:8080"
 
@@ -125,20 +124,11 @@ int free_telemetry() {
         return 1;
     }
 
-    if (rename(BACKUP_ADDRESS, TEMP_ADDRESS) != 0) {
-        fprintf(stderr, "Failed to rename backup file\n");
-        return 1;
-    }
     if (rename(COPY_ADDRESS, BACKUP_ADDRESS) != 0) {
         fprintf(stderr, "Failed to rename copy file\n");
-        if (rename(TEMP_ADDRESS, BACKUP_ADDRESS) != 0) {
-            fprintf(stderr, "Failed to restore backup file\n");
-        }
         return 1;
     }
-    if (remove(TEMP_ADDRESS) != 0) {
-        fprintf(stderr, "Failed to remove temporary file\n");
-    }
+
     return 0;
 }
 
@@ -227,8 +217,8 @@ long get_packets_saved() {
     long packet_count = 0;
     FILE *file = fopen(BACKUP_ADDRESS, "rb");
     if (file == NULL) {
-        FILE *temp_file = fopen(TEMP_ADDRESS, "rb");
-        if (temp_file == NULL) {
+        FILE *copy_file = fopen(COPY_ADDRESS, "rb");
+        if (copy_file == NULL) {
             fprintf(stderr, "Backup file does not exist, creating new backup file\n");
             if (write_telemetry(NULL, 0) != 0) { // create backup file if doesn't exist
                 fprintf(stderr, "Failed to create backup file\n");
@@ -237,12 +227,12 @@ long get_packets_saved() {
             return 0;
         } else {
             fprintf(stderr, "Attempting to recover backup file...\n");
-            if (rename(TEMP_ADDRESS, BACKUP_ADDRESS) != 0) {
+            if (rename(COPY_ADDRESS, BACKUP_ADDRESS) != 0) {
                 fprintf(stderr, "Failed to recover backup file\n");
                 return -1;
             }
             fprintf(stderr, "Backup file recovered successfully\n");
-            fclose(temp_file);
+            fclose(copy_file);
             file = fopen(BACKUP_ADDRESS, "rb");
             if (file == NULL) {
                 fprintf(stderr, "Failed to open recovered backup file\n");
@@ -268,7 +258,11 @@ long get_packets_saved() {
     packet_count = size / PACKET_SIZE;
     if (size % PACKET_SIZE != 0) {
         fprintf(stderr, "Backup file contains trailing data\n");
-        return -1;
+        if (truncate(BACKUP_ADDRESS, packet_count * PACKET_SIZE) != 0) {
+            fprintf(stderr, "Failed to remove trailing data\n");
+            return -1;
+        }
+        fprintf(stderr, "Removed trailing data\n");
     }
     return packet_count;
 }
@@ -280,6 +274,8 @@ static void *upload_thread(void *context_ptr) {
     int result = 1;
     backup_context_t *context = (backup_context_t *)context_ptr;
     int reset_time = 500000; // 0.5 seconds
+
+    fprintf(stderr, "Created uploader thread\n");
 
     // set up curl
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
@@ -355,7 +351,6 @@ int main(void) {
     int upload_active = 0;
 
     // set up NNG
-    fprintf(stderr, "Opening NNG receiver socket...\n");
     if ((nng_rv = nng_sub0_open(&receiver)) != 0) {
         goto nng_error;
     }
