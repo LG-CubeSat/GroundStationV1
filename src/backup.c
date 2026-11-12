@@ -1,3 +1,4 @@
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +17,9 @@
 #define BACKUP_ADDRESS "telemetry_backup.bin"
 #define COPY_ADDRESS "telemetry_copy.bin"
 
-// #define WEB_SERVER_ADDRESS "127.0.0.1:8080"
+// build/GSMain & build/GSBackup & build/GSEyecandy & sleep 5; build/GSTest &
+
+static volatile sig_atomic_t keep_running = 0;
 
 typedef struct {
     pthread_mutex_t file_mutex;
@@ -26,11 +29,20 @@ typedef struct {
     int stop_thread;
 } backup_context_t;
 
+static void request_shutdown(int signal_number) {
+    (void)signal_number;
+    keep_running = 0;
+}
+
 void nng_msg_full_free(nng_msg **message) {
     if (message != NULL && *message != NULL) {
         nng_msg_free(*message);
         *message = NULL;
     }
+}
+
+size_t http_callback(char *data, size_t size, size_t count, void *arg) {
+    return size * count;
 }
 
 int write_telemetry(const void *data, size_t len) {
@@ -179,6 +191,12 @@ CURLcode upload_telemetry(backup_context_t *context) {
             curl_slist_free_all(headers);
             return curl_rv;
         }
+        curl_rv = curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, http_callback);
+        if (curl_rv != CURLE_OK) {
+            curl_easy_cleanup(handle);
+            curl_slist_free_all(headers);
+            return curl_rv;
+        }
         curl_rv = curl_easy_setopt(handle, CURLOPT_TIMEOUT, 5L);
         if (curl_rv != CURLE_OK) {
             curl_easy_cleanup(handle);
@@ -285,7 +303,7 @@ static void *upload_thread(void *context_ptr) {
     curl_open = 1;
 
     // main loop
-    for (;;) {
+    for(;;) {
         // check if write thread stopped
         pthread_mutex_lock(&context->stop_mutex);
         if (context->stop_thread != 0) {
@@ -304,7 +322,6 @@ static void *upload_thread(void *context_ptr) {
         curl_rv = upload_telemetry(context);
         if (curl_rv == CURLE_OK) {
             reset_time = 500000; // reset to 0.5 seconds
-            fprintf(stderr, "Successfully uploaded telemetry data\n");
             // remove uploaded packet from backup file
             pthread_mutex_lock(&context->file_mutex);
             if (free_telemetry() != 0) {
@@ -350,6 +367,10 @@ int main(void) {
     int mutex_inits = 0;
     int upload_active = 0;
 
+    (void)signal(SIGINT, request_shutdown);
+    (void)signal(SIGTERM, request_shutdown);
+    keep_running = 1;
+
     // set up NNG
     if ((nng_rv = nng_sub0_open(&receiver)) != 0) {
         goto nng_error;
@@ -394,7 +415,7 @@ int main(void) {
     upload_active = 1;
 
     // main loop
-    for (;;) {
+    while(keep_running) {
         // check if upload thread stopped
         pthread_mutex_lock(&context->stop_mutex);
         if (context->stop_thread != 0) {
@@ -430,13 +451,13 @@ int main(void) {
             goto cleanup;
         }
         pthread_mutex_unlock(&context->file_mutex);
-        fprintf(stderr, "Telemetry written to backup file\n");
         pthread_mutex_lock(&context->counter_mutex);
         context->packet_count ++;
         pthread_mutex_unlock(&context->counter_mutex);
         nng_msg_full_free(&message);
     }
     result = EXIT_SUCCESS;
+    goto cleanup;
 nng_error:
     fprintf(stderr, "NNG error: %s\n", nng_strerror(nng_rv));
 cleanup:
