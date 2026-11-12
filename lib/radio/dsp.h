@@ -22,6 +22,16 @@ Bandwidth_hz currently only stores information, it does not automatically choose
 
 #define DSP_MAX_TAPS 129
 
+typedef enum {
+
+    DSP_OK = 0,
+    DSP_ERROR_NULL = -1,
+    DSP_ERROR_RANGE = -2,
+    DSP_ERROR_NONFINITE = -3,
+    DSP_ERROR_FILTER_DESIGN = -4,
+
+} error_status_t;
+
 typedef struct {                                
     double sample_rate_hz;                                      
     double bandwidth_hz;

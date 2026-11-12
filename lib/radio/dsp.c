@@ -10,11 +10,11 @@ No demonstrated improvement in real packet reception yet.
 */
 
 static int32_t dsp_design_lowpass(float filter_weights[], size_t weight_capacity, size_t weight_count, double sample_rate_hz, double cutoff_frequency_hz){
-    if (filter_weights == NULL) return -1;
-    if (weight_count % 2 == 0 || weight_count < 3) return -2;
-    if (weight_count > weight_capacity) return -3;
-    if (!isfinite(sample_rate_hz) || !isfinite(cutoff_frequency_hz)) return -4;
-    if (sample_rate_hz <= 0 || !(cutoff_frequency_hz > 0 && cutoff_frequency_hz < (sample_rate_hz / 2))) return -5;
+    if (filter_weights == NULL) return DSP_ERROR_NULL;
+    if (weight_count % 2 == 0 || weight_count < 3) return DSP_ERROR_RANGE;
+    if (weight_count > weight_capacity) return DSP_ERROR_RANGE;
+    if (!isfinite(sample_rate_hz) || !isfinite(cutoff_frequency_hz)) return DSP_ERROR_NONFINITE;
+    if (sample_rate_hz <= 0 || !(cutoff_frequency_hz > 0 && cutoff_frequency_hz < (sample_rate_hz / 2))) return DSP_ERROR_RANGE;
 
     double normalized_cutoff = cutoff_frequency_hz / sample_rate_hz;
     size_t middle_index = (weight_count - 1) / 2;
@@ -34,22 +34,22 @@ static int32_t dsp_design_lowpass(float filter_weights[], size_t weight_capacity
         running_sum += filter_weights[i];
     }
 
-    if (!isfinite(running_sum)) return -6;
-    if (running_sum == 0) return -7;
+    if (!isfinite(running_sum)) return DSP_ERROR_NONFINITE;
+    if (running_sum == 0) return DSP_ERROR_FILTER_DESIGN;
 
     for (size_t i = 0; i < weight_count; i++){
         filter_weights[i] /= running_sum;
     }
     
-    return 0;
+    return DSP_OK;
 }
 
 int32_t dsp_init(dsp_state_t *state, double sample_rate_hz, double bandwidth_hz, size_t tap_count, double cutoff_frequency_hz){
 
-    if (state == NULL) return -1;
-    if (!isfinite(sample_rate_hz) || !isfinite(bandwidth_hz)) return -2;
-    if (sample_rate_hz <= 0 || bandwidth_hz <= 0) return -3;
-    if (bandwidth_hz >= sample_rate_hz) return -4;
+    if (state == NULL) return DSP_ERROR_NULL;
+    if (!isfinite(sample_rate_hz) || !isfinite(bandwidth_hz)) return DSP_ERROR_NONFINITE;
+    if (sample_rate_hz <= 0 || bandwidth_hz <= 0) return DSP_ERROR_RANGE;
+    if (bandwidth_hz >= sample_rate_hz) return DSP_ERROR_RANGE;
 
     dsp_state_t prepared = {0};
     prepared.sample_rate_hz = sample_rate_hz;
@@ -61,16 +61,16 @@ int32_t dsp_init(dsp_state_t *state, double sample_rate_hz, double bandwidth_hz,
     prepared.tap_count = tap_count;
     *state = prepared;
 
-    return 0; 
+    return DSP_OK; 
 
 }
 
 int32_t dsp_process(dsp_state_t *state, float complex *samples, size_t count){
 
-    if (state == NULL) return -1;
-    if (state->tap_count < 3 || state->tap_count > DSP_MAX_TAPS || state->tap_count % 2 == 0) return -2;
-    if (count == 0) return 0; // return 0 when there are no samples to process
-    if (samples == NULL) return -3;
+    if (state == NULL) return DSP_ERROR_NULL;
+    if (state->tap_count < 3 || state->tap_count > DSP_MAX_TAPS || state->tap_count % 2 == 0) return DSP_ERROR_RANGE;
+    if (count == 0) return DSP_OK; // return OK when there are no samples to process
+    if (samples == NULL) return DSP_ERROR_NULL;
 
     for (size_t i = 0; i < count; i++){
         for (size_t j = (state->tap_count - 1); j > 0; j--){
@@ -87,19 +87,19 @@ int32_t dsp_process(dsp_state_t *state, float complex *samples, size_t count){
 
     }
 
-    return 0;
+    return DSP_OK;
 
 }
 
 int32_t dsp_shift(dsp_state_t *state, float complex *samples, size_t count, float frequency_offset_hz){
 
-    if (state == NULL) return -1;                            
-    if (!isfinite(state->sample_rate_hz)) return -2;            
-    if (state->sample_rate_hz <= 0) return -3;                  
-    if (!isfinite(frequency_offset_hz)) return -4;
-    if (!isfinite(state->shift_phase)) return -5;
-    if (count == 0) return 0;  // return 0 when there are no samples to process
-    if (samples == NULL) return -6;
+    if (state == NULL) return DSP_ERROR_NULL;                            
+    if (!isfinite(state->sample_rate_hz)) return DSP_ERROR_NONFINITE;            
+    if (state->sample_rate_hz <= 0) return DSP_ERROR_RANGE;                  
+    if (!isfinite(frequency_offset_hz)) return DSP_ERROR_NONFINITE;
+    if (!isfinite(state->shift_phase)) return DSP_ERROR_NONFINITE;
+    if (count == 0) return DSP_OK;  // return OK when there are no samples to process
+    if (samples == NULL) return DSP_ERROR_NULL;
 
     const double pi = 3.141592653589793;
 
@@ -113,6 +113,6 @@ int32_t dsp_shift(dsp_state_t *state, float complex *samples, size_t count, floa
         state->shift_phase = remainder(state->shift_phase, 2 * pi);
     }
 
-    return 0;
+    return DSP_OK;
 
 }
