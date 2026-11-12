@@ -196,6 +196,10 @@ static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void 
         receive_ssdv(context, payload.data, sizeof(payload.data));
         return CCSDS_OK;
     }
+    if (view.header.apid != LG_CCSDS_APID_RAW_TELEMETRY) {
+        fprintf(stderr, "Dropping packet without telemetry or SSDV APID\n");
+        return CCSDS_OK;
+    }
 
     rv = nng_msg_alloc(&message, view.data_length);
     if (rv == 0) {
