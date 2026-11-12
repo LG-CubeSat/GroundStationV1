@@ -6,8 +6,8 @@ set(NNG_TESTS OFF CACHE BOOL "Build NNG tests" FORCE)
 add_subdirectory(lib/nng)
 add_subdirectory(lib/radio)
 add_subdirectory(lib/ccsds)
-find_package(OpenSSL REQUIRED)
 add_subdirectory(lib/curl)
+find_package(OpenSSL REQUIRED)
 
 set(CIVETWEB_BUILD_TESTING OFF CACHE BOOL "Build CivetWeb tests")
 set(CIVETWEB_ENABLE_SERVER_EXECUTABLE OFF CACHE BOOL "Build the standalone CivetWeb server")
@@ -22,6 +22,10 @@ add_library(SSDV STATIC lib/SSDV/rs8.c lib/SSDV/ssdv.c)
 add_library(GroundStationSerial STATIC lib/serial.c)
 target_include_directories(GroundStationSerial PUBLIC lib)
 target_compile_features(GroundStationSerial PUBLIC c_std_11)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+find_package(Threads REQUIRED)
 
 # Prod Executables
 add_executable(GSMain src/main.c)
@@ -40,7 +44,7 @@ target_compile_features(GSBackup PRIVATE c_std_11)
 if(TARGET libcurl_static)
     target_include_directories(libcurl_static BEFORE PRIVATE "${OPENSSL_INCLUDE_DIR}")
 endif()
-target_link_libraries(GSBackup PRIVATE nng GroundStationSerial CURL::libcurl)
+target_link_libraries(GSBackup PRIVATE nng GroundStationSerial CURL::libcurl Threads::Threads)
 
 # Test Slop
 add_executable(GSTest src/test.c)

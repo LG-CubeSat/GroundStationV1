@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <threads.h>
+#include <pthread.h>
 #include <unistd.h>
 
 #include "nng/nng.h"
@@ -20,9 +20,9 @@
 // #define WEB_SERVER_ADDRESS "127.0.0.1:8080"
 
 typedef struct {
-    mtx_t file_mutex;
-    mtx_t counter_mutex;
-    mtx_t stop_mutex;
+    pthread_mutex_t file_mutex;
+    pthread_mutex_t counter_mutex;
+    pthread_mutex_t stop_mutex;
     long packet_count;
     int stop_thread;
 } backup_context_t;
@@ -149,13 +149,13 @@ CURLcode upload_telemetry(backup_context_t *context) {
     long HTTP_rv = 0;
     uint8_t buffer[PACKET_SIZE];
 
-    mtx_lock(&context->file_mutex);
+    pthread_mutex_lock(&context->file_mutex);
     if (read_telemetry(buffer) != 0) {
-        mtx_unlock(&context->file_mutex);
+        pthread_mutex_unlock(&context->file_mutex);
         fprintf(stderr, "Failed to read telemetry from backup file\n");
         return CURLE_READ_ERROR;
     }
-    mtx_unlock(&context->file_mutex);
+    pthread_mutex_unlock(&context->file_mutex);
 
     handle = curl_easy_init();
     if (handle) {
@@ -273,7 +273,7 @@ long get_packets_saved() {
     return packet_count;
 }
 
-int upload_thread(void *context_ptr) {
+static void *upload_thread(void *context_ptr) {
     int curl_open = 0;
     CURLcode curl_rv;
 
@@ -291,35 +291,35 @@ int upload_thread(void *context_ptr) {
     // main loop
     for (;;) {
         // check if write thread stopped
-        mtx_lock(&context->stop_mutex);
+        pthread_mutex_lock(&context->stop_mutex);
         if (context->stop_thread != 0) {
-            mtx_unlock(&context->stop_mutex);
+            pthread_mutex_unlock(&context->stop_mutex);
             goto cleanup;
         }
-        mtx_unlock(&context->stop_mutex);
+        pthread_mutex_unlock(&context->stop_mutex);
 
-        mtx_lock(&context->counter_mutex);
+        pthread_mutex_lock(&context->counter_mutex);
         if (context->packet_count < MAX_PACKETS_STORED){
-            mtx_unlock(&context->counter_mutex);
+            pthread_mutex_unlock(&context->counter_mutex);
             usleep(1000000);
             continue; // if not at capacity, no need to upload
         }
-        mtx_unlock(&context->counter_mutex);
+        pthread_mutex_unlock(&context->counter_mutex);
         curl_rv = upload_telemetry(context);
         if (curl_rv == CURLE_OK) {
             reset_time = 500000; // reset to 0.5 seconds
             fprintf(stderr, "Successfully uploaded telemetry data\n");
             // remove uploaded packet from backup file
-            mtx_lock(&context->file_mutex);
+            pthread_mutex_lock(&context->file_mutex);
             if (free_telemetry() != 0) {
-                mtx_unlock(&context->file_mutex);
+                pthread_mutex_unlock(&context->file_mutex);
                 fprintf(stderr, "Failed to free telemetry from backup file\n");
                 goto cleanup;
             }
-            mtx_unlock(&context->file_mutex);
-            mtx_lock(&context->counter_mutex);
+            pthread_mutex_unlock(&context->file_mutex);
+            pthread_mutex_lock(&context->counter_mutex);
             context->packet_count --;
-            mtx_unlock(&context->counter_mutex);
+            pthread_mutex_unlock(&context->counter_mutex);
         } else {
             fprintf(stderr, "Failed to upload telemetry, will retry in %d: %s\n", reset_time, curl_easy_strerror(curl_rv));
             usleep(reset_time); // wait for more packets to accumulate
@@ -331,10 +331,10 @@ int upload_thread(void *context_ptr) {
     result = 0;
 cleanup:
     if (curl_open) curl_global_cleanup();
-    mtx_lock(&context->stop_mutex);
+    pthread_mutex_lock(&context->stop_mutex);
     context->stop_thread = 1;
-    mtx_unlock(&context->stop_mutex);
-    thrd_exit(result);
+    pthread_mutex_unlock(&context->stop_mutex);
+    return (void *)(intptr_t)result;
 }
 
 int main(void) {
@@ -343,7 +343,7 @@ int main(void) {
     nng_socket receiver = NNG_SOCKET_INITIALIZER;
     nng_msg *message = NULL;
 
-    thrd_t upload_thread_id;
+    pthread_t upload_thread_id;
     int result = EXIT_FAILURE;
     backup_context_t *context = malloc(sizeof(backup_context_t));
     if (context == NULL) {
@@ -369,17 +369,17 @@ int main(void) {
     }
 
     // set up mutexes
-    if (mtx_init(&context->file_mutex, mtx_plain) != thrd_success) {
+    if (pthread_mutex_init(&context->file_mutex, NULL) != 0) {
         fprintf(stderr, "Failed to initialize file mutex\n");
         goto cleanup;
     }
     mutex_inits ++;
-    if (mtx_init(&context->counter_mutex, mtx_plain) != thrd_success) {
+    if (pthread_mutex_init(&context->counter_mutex, NULL) != 0) {
         fprintf(stderr, "Failed to initialize counter mutex\n");
         goto cleanup;
     }
     mutex_inits ++;
-    if (mtx_init(&context->stop_mutex, mtx_plain) != thrd_success) {
+    if (pthread_mutex_init(&context->stop_mutex, NULL) != 0) {
         fprintf(stderr, "Failed to initialize counter mutex\n");
         goto cleanup;
     }
@@ -392,7 +392,7 @@ int main(void) {
     }
 
     // separate write data and upload data
-    if (thrd_create(&upload_thread_id, upload_thread, context) != thrd_success) {
+    if (pthread_create(&upload_thread_id, NULL, upload_thread, context) != 0) {
         fprintf(stderr, "Failed to create upload thread\n");
         goto cleanup;
     }
@@ -401,15 +401,15 @@ int main(void) {
     // main loop
     for (;;) {
         // check if upload thread stopped
-        mtx_lock(&context->stop_mutex);
+        pthread_mutex_lock(&context->stop_mutex);
         if (context->stop_thread != 0) {
-            mtx_unlock(&context->stop_mutex);
-            int thread_result;
-            thrd_join(upload_thread_id, &thread_result);
+            pthread_mutex_unlock(&context->stop_mutex);
+            void *thread_result;
+            pthread_join(upload_thread_id, &thread_result);
             upload_active = 0;
             goto cleanup;
         }
-        mtx_unlock(&context->stop_mutex);
+        pthread_mutex_unlock(&context->stop_mutex);
 
         // check if message on nng channel
         nng_rv = nng_recvmsg(receiver, &message, NNG_FLAG_NONBLOCK);
@@ -424,22 +424,22 @@ int main(void) {
         if (nng_msg_len(message) != PACKET_SIZE) {
             fprintf(stderr, "Dropping packet of size %zu; expected packet of size %zu\n",
                     nng_msg_len(message), PACKET_SIZE);
-            nng_msg_full_free(message);
+            nng_msg_full_free(&message);
             continue;
         }
 
-        mtx_lock(&context->file_mutex);
+        pthread_mutex_lock(&context->file_mutex);
         if (write_telemetry(nng_msg_body(message), nng_msg_len(message)) != 0) {
-            mtx_unlock(&context->file_mutex);
+            pthread_mutex_unlock(&context->file_mutex);
             fprintf(stderr, "Failed to write telemetry to backup file\n");
             goto cleanup;
         }
-        mtx_unlock(&context->file_mutex);
+        pthread_mutex_unlock(&context->file_mutex);
         fprintf(stderr, "Telemetry written to backup file\n");
-        mtx_lock(&context->counter_mutex);
+        pthread_mutex_lock(&context->counter_mutex);
         context->packet_count ++;
-        mtx_unlock(&context->counter_mutex);
-        nng_msg_full_free(message);
+        pthread_mutex_unlock(&context->counter_mutex);
+        nng_msg_full_free(&message);
     }
     result = EXIT_SUCCESS;
 nng_error:
@@ -447,17 +447,17 @@ nng_error:
 cleanup:
     if (context != NULL) {
         if (upload_active == 1) {
-            mtx_lock(&context->stop_mutex);
+            pthread_mutex_lock(&context->stop_mutex);
             context->stop_thread = 1;
-            mtx_unlock(&context->stop_mutex);
-            int thread_result;
-            thrd_join(upload_thread_id, &thread_result);
+            pthread_mutex_unlock(&context->stop_mutex);
+            void *thread_result;
+            pthread_join(upload_thread_id, &thread_result);
         }
-        if (mutex_inits >= 1) mtx_destroy(&context->file_mutex);
-        if (mutex_inits >= 2) mtx_destroy(&context->counter_mutex);
-        if (mutex_inits >= 3) mtx_destroy(&context->stop_mutex);
+        if (mutex_inits >= 1) pthread_mutex_destroy(&context->file_mutex);
+        if (mutex_inits >= 2) pthread_mutex_destroy(&context->counter_mutex);
+        if (mutex_inits >= 3) pthread_mutex_destroy(&context->stop_mutex);
     }
-    if (message != NULL) nng_msg_full_free(message);
+    nng_msg_full_free(&message);
     if (receiver_open) nng_close(receiver);
     return result;
 }
