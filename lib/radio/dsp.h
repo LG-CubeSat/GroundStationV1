@@ -30,7 +30,7 @@ typedef enum {
     DSP_ERROR_NONFINITE = -3,
     DSP_ERROR_FILTER_DESIGN = -4,
 
-} error_status_t;
+} dsp_status_t;
 
 typedef struct {                                
     double sample_rate_hz;                                      
@@ -45,5 +45,6 @@ typedef struct {
 int32_t dsp_init(dsp_state_t *state, double sample_rate_hz, double bandwidth_hz, size_t tap_count, double cutoff_frequency_hz); // Initialize dsp state and generate weights
 int32_t dsp_process(dsp_state_t *state, float complex *samples, size_t count); // Process samples with generated weights
 int32_t dsp_shift(dsp_state_t *state, float complex *samples, size_t count, float frequency_offset_hz); // Correct frequency offsets
+const char* dsp_status_string(int32_t status); // Prints status and error messages
 
 #endif

@@ -34,7 +34,7 @@ static int32_t dsp_design_lowpass(float filter_weights[], size_t weight_capacity
         running_sum += filter_weights[i];
     }
 
-    if (!isfinite(running_sum)) return DSP_ERROR_NONFINITE;
+    if (!isfinite(running_sum)) return DSP_ERROR_FILTER_DESIGN;
     if (running_sum == 0) return DSP_ERROR_FILTER_DESIGN;
 
     for (size_t i = 0; i < weight_count; i++){
@@ -57,7 +57,7 @@ int32_t dsp_init(dsp_state_t *state, double sample_rate_hz, double bandwidth_hz,
     prepared.agc_gain = 1.0F;
     
     int32_t status = dsp_design_lowpass(prepared.fir_coefficients, DSP_MAX_TAPS, tap_count, sample_rate_hz, cutoff_frequency_hz);
-    if (status != 0) return status;
+    if (status != DSP_OK) return status;
     prepared.tap_count = tap_count;
     *state = prepared;
 
@@ -116,3 +116,26 @@ int32_t dsp_shift(dsp_state_t *state, float complex *samples, size_t count, floa
     return DSP_OK;
 
 }
+
+const char* dsp_status_string(int32_t status){
+    switch (status){
+        case DSP_OK:
+            return "Success";
+
+        case DSP_ERROR_NULL:
+            return "Required pointer is NULL";
+
+        case DSP_ERROR_RANGE:
+            return "Setting outside allowed range";
+
+        case DSP_ERROR_NONFINITE:
+            return "Nonfinite numerical value";
+
+        case DSP_ERROR_FILTER_DESIGN:
+            return "Filter design failed";
+
+        default:
+            return "Unknown DSP status";      
+    }
+}
+
