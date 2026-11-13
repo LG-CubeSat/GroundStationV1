@@ -20,14 +20,24 @@ add_library(SSDV STATIC lib/SSDV/rs8.c lib/SSDV/ssdv.c)
 add_library(GroundStationSerial STATIC lib/serial.c)
 target_include_directories(GroundStationSerial PUBLIC lib)
 target_compile_features(GroundStationSerial PUBLIC c_std_11)
+add_library(GroundStationFlightProtocol STATIC src/flight_protocol.c)
+target_include_directories(GroundStationFlightProtocol PUBLIC src)
+target_compile_features(GroundStationFlightProtocol PUBLIC c_std_11)
 
 # Prod Executables
 add_executable(GSMain src/main.c)
 target_compile_features(GSMain PRIVATE c_std_11)
 target_include_directories(GSMain PRIVATE lib/ccsds/include lib/nng/include)
-target_link_libraries(GSMain PRIVATE ccsds RadioHandler nng GroundStationSerial SSDV)
+target_link_libraries(GSMain PRIVATE ccsds RadioHandler nng GroundStationFlightProtocol SSDV)
 
 # Web executable uses NNG and CivetWeb libraries
 add_executable(GSEyecandy src/web.c)
 target_compile_features(GSEyecandy PRIVATE c_std_11)
-target_link_libraries(GSEyecandy PRIVATE nng civetweb-c-library GroundStationSerial)
+target_link_libraries(GSEyecandy PRIVATE nng civetweb-c-library GroundStationFlightProtocol)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(flight_protocol_test tests/test_flight_protocol.c)
+    target_link_libraries(flight_protocol_test PRIVATE GroundStationFlightProtocol ccsds m)
+    add_test(NAME flight_protocol_test COMMAND flight_protocol_test)
+endif()

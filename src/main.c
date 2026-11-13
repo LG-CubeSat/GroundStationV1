@@ -12,8 +12,8 @@
 
 #include "ccsds/ccsds.h"
 #include "groundstation_message.h"
+#include "flight_protocol.h"
 #include "radio.h"
-#include "serial.h"
 #include "../lib/SSDV/ssdv.h"
 
 #define TELEMETRY_MAX_DECODED 4096 // biggest decompressed telemetry we'll accept
@@ -205,10 +205,15 @@ static void receive_packet(receive_context_t *context, const uint8_t *packet, si
         payload_length = decoded_length;
     }
 
-    // telemetry goes out to the ui over nng
-    rv = nng_msg_alloc(&message, payload_length);
+    gs_adcs_telemetry_t telemetry;
+    if (gs_decode_adcs_record(payload, payload_length, &telemetry) != 0) {
+        fprintf(stderr, "Dropping unsupported telemetry record (%zu bytes)\n", payload_length);
+        return;
+    }
+
+    rv = nng_msg_alloc(&message, sizeof(telemetry));
     if (rv == 0) {
-        memcpy(nng_msg_body(message), payload, payload_length);
+        memcpy(nng_msg_body(message), &telemetry, sizeof(telemetry));
         rv = nng_sendmsg(context->publisher, message, NNG_FLAG_NONBLOCK);
         if (rv != 0) nng_msg_free(message);
     }
@@ -217,13 +222,20 @@ static void receive_packet(receive_context_t *context, const uint8_t *packet, si
 
 static int send_command(nng_msg *message) {
     int rv;
+    gs_command_request_t request;
+    uint8_t payload[14];
+    size_t length = 0;
 
-    if (nng_msg_len(message) != sizeof(groundstation_command_packet_t)) {
-        fprintf(stderr, "Dropping NNG command of size %zu; expected %zu-byte struct\n",
-                nng_msg_len(message), sizeof(groundstation_command_packet_t));
+    if (nng_msg_len(message) != sizeof(request)) {
+        fprintf(stderr, "Dropping NNG command of size %zu\n", nng_msg_len(message));
         return 0;
     }
-    rv = radio_send_command(nng_msg_body(message), nng_msg_len(message));
+    memcpy(&request, nng_msg_body(message), sizeof(request));
+    if (gs_build_command(&request, payload, sizeof(payload), &length) != 0) {
+        fprintf(stderr, "Dropping unknown ground command kind %u\n", request.kind);
+        return 0;
+    }
+    rv = radio_send_command(payload, length);
     if (rv < 0) {
         fprintf(stderr, "Radio send failed (%d); command transmission is uncertain\n", rv);
         return -1;
@@ -245,7 +257,7 @@ int main(void) {
     if ((rv = nng_pull0_open(&commands)) != 0) goto nng_error;
     commands_open = 1;
     if ((rv = nng_socket_set_size(commands, NNG_OPT_RECVMAXSZ,
-                                   sizeof(groundstation_command_packet_t))) != 0)
+                                   sizeof(gs_command_request_t))) != 0)
         goto nng_error;
     if ((rv = nng_listen(commands, GROUNDSTATION_COMMAND_NNG_URL, NULL, 0)) != 0) goto nng_error;
 
