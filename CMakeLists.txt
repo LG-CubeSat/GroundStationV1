@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.16)
 project(GroundStation LANGUAGES C)
 
 # Libraries
@@ -12,7 +12,7 @@ set(CIVETWEB_ENABLE_SERVER_EXECUTABLE OFF CACHE BOOL "Build the standalone Civet
 set(CIVETWEB_ENABLE_ASAN OFF CACHE BOOL "Enable AddressSanitizer for CivetWeb")
 # CivetWeb v1.16 declares policies older than CMake 4 supports.
 if(NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
-    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
 endif()
 add_subdirectory(lib/civetweb)
 
@@ -25,7 +25,7 @@ target_include_directories(GroundStationFlightProtocol PUBLIC src)
 target_compile_features(GroundStationFlightProtocol PUBLIC c_std_11)
 
 # Prod Executables
-add_executable(GSMain src/main.c)
+add_executable(GSMain src/main.c src/radio_transport.c)
 target_compile_features(GSMain PRIVATE c_std_11)
 target_include_directories(GSMain PRIVATE lib/ccsds/include lib/nng/include)
 target_link_libraries(GSMain PRIVATE ccsds RadioHandler nng GroundStationFlightProtocol SSDV)

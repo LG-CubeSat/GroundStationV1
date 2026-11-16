@@ -49,6 +49,22 @@ typedef struct {
     float minimum_stack_margin_words;
 } gs_adcs_telemetry_t;
 
+typedef struct {
+    uint32_t request_id;
+    uint8_t node;
+    uint8_t port;
+    uint8_t command_id;
+    uint8_t status;
+} gs_command_result_t;
+
+enum {
+    GS_RESULT_ADCS_ACK = 0,
+    GS_RESULT_ADCS_NACK = 1,
+    GS_RESULT_TIMEOUT = 2,
+    GS_RESULT_ROUTE_ERROR = 3,
+    GS_RESULT_OBC_QUEUED = 4
+};
+
 /* Returns an RF command payload: destination node, CSP port, then command. */
 int gs_build_command(const gs_command_request_t *request, uint8_t *out,
                      size_t capacity, size_t *written);
@@ -56,5 +72,9 @@ int gs_build_command(const gs_command_request_t *request, uint8_t *out,
 /* Decodes the WESW OBC record and its ADCS v3 payload. */
 int gs_decode_adcs_record(const uint8_t *record, size_t length,
                           gs_adcs_telemetry_t *out);
+
+/* Parses a WACK result returned by the flight OBC for an RF command. */
+int gs_decode_command_result(const uint8_t *payload, size_t length,
+                             gs_command_result_t *out);
 
 #endif

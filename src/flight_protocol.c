@@ -102,3 +102,17 @@ int gs_decode_adcs_record(const uint8_t *record, size_t length,
     out->minimum_stack_margin_words = befloat(p + 180);
     return 0;
 }
+
+int gs_decode_command_result(const uint8_t *payload, size_t length,
+                             gs_command_result_t *out) {
+    if (payload == NULL || out == NULL || length != 14 ||
+        memcmp(payload, "WACK", 4) != 0 || payload[4] != 1 ||
+        payload[8] > GS_RESULT_OBC_QUEUED || payload[9] != 0)
+        return -1;
+    out->node = payload[5];
+    out->port = payload[6];
+    out->command_id = payload[7];
+    out->status = payload[8];
+    out->request_id = be32(payload + 10);
+    return 0;
+}

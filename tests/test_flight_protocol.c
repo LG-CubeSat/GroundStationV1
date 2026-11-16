@@ -81,6 +81,14 @@ int main(void) {
     CHECK(gs_decode_adcs_record(record, sizeof(record), &decoded) != 0);
     record[18] = 'A';
     CHECK(gs_decode_adcs_record(record, sizeof(record) - 1, &decoded) != 0);
+    const uint8_t ack_wire[14] = {
+        'W','A','C','K', 1, 2, 10, 64, 0, 0, 0x12, 0x34, 0x56, 0x78
+    };
+    gs_command_result_t result;
+    CHECK(gs_decode_command_result(ack_wire, sizeof(ack_wire), &result) == 0);
+    CHECK(result.request_id == 0x12345678U && result.node == 2 &&
+          result.command_id == 64 && result.status == GS_RESULT_ADCS_ACK);
+    CHECK(gs_decode_command_result(ack_wire, sizeof(ack_wire) - 1, &result) != 0);
     if (failures) return 1;
     puts("flight_protocol_test: PASS");
     return 0;

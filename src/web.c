@@ -23,6 +23,9 @@ typedef struct {
     uint64_t packets;
     nng_time received_at;
     gs_adcs_telemetry_t telemetry;
+    gs_command_result_t command_result;
+    nng_time command_result_at;
+    int have_command_result;
 } web_state_t;
 
 static volatile sig_atomic_t keep_running = 1;
@@ -59,7 +62,8 @@ static const char index_html[] =
     "<div class='card'>Rejected commands<strong id='rejected'>—</strong></div>"
     "<div class='card'>Minimum stack margin<strong id='stack'>—</strong></div>"
     "</div><h2>Commands</h2>"
-    "<p>Buttons queue an RF command. Delivery and ADCS ACK are not yet returned over RF.</p>"
+    "<p>Run the link check to verify RF uplink, ADCS acknowledgment, and fresh IMU-valid telemetry downlink.</p>"
+    "<button class='safe' data-command='linkcheck'>Run end-to-end link check</button>"
     "<button class='safe' data-command='safe'>Set ADCS Safe</button>"
     "<button class='safe' data-command='inhibit'>Inhibit actuators</button>"
     "<button data-command='reset_imu'>Reset IMU</button>"
@@ -67,11 +71,12 @@ static const char index_html[] =
     "<button data-command='photo'>Take photo</button>"
     "<p id='command-status' role='status'></p>"
     "<h2>Latest decoded record</h2><pre id='record'>Waiting...</pre>"
-    "<script>const el=id=>document.getElementById(id);"
+    "<script>const el=id=>document.getElementById(id);let lastRequest=null,linkCheck=null,lastPackets=0;"
     "const modes=['BOOT','SAFE','DETUMBLE','SUN ACQUISITION','SUN POINTING','EARTH POINTING','SLEWING','TARGET POINTING','SCIENCE'];"
     "const vec=a=>a.map(x=>Number.isFinite(x)?x.toPrecision(4):'—').join(', ');"
     "async function refresh(){try{const r=await fetch('/api/telemetry',{cache:'no-store',signal:AbortSignal.timeout(5000)});"
     "if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();"
+    "lastPackets=d.packets;"
     "el('packets').textContent=d.packets.toLocaleString();"
     "el('age').textContent=d.packets?(d.age_ms/1000).toFixed(1)+' s ago':'Never';"
     "el('status').textContent=!d.packets?'Waiting for ADCS telemetry...':d.age_ms<5000?'Receiving ADCS telemetry':'Telemetry stale';"
@@ -85,12 +90,35 @@ static const char index_html[] =
     "el('flags').textContent='0x'+t.control_flags.toString(16)+' / 0x'+t.health_flags.toString(16);"
     "el('dropped').textContent=t.dropped_messages;el('rejected').textContent=t.rejected_commands;"
     "el('stack').textContent=Number.isFinite(t.minimum_stack_margin_words)?t.minimum_stack_margin_words.toFixed(0)+' words':'—';"
-    "el('record').textContent=JSON.stringify(t,null,2);}}catch(e){el('status').textContent='Web connection unavailable: '+e.message;}"
+    "el('record').textContent=JSON.stringify(t,null,2);}"
+    "if(lastRequest&&d.command_result&&d.command_result.request_id===lastRequest.id){"
+    "const labels=['ADCS ACK','ADCS NACK','ADCS timeout','OBC route error','OBC queued'];"
+    "el('command-status').textContent=lastRequest.name+': '+labels[d.command_result.status]+'.';"
+    "lastRequest=null;}"
+    "else if(lastRequest&&!linkCheck&&Date.now()>lastRequest.deadline){"
+    "el('command-status').textContent=lastRequest.name+': no flight result within 45 s.';lastRequest=null;}"
+    "if(linkCheck){const a=d.command_result;"
+    "const ack=!!(a&&a.request_id===linkCheck.id&&a.status===0);"
+    "const fresh=d.packets>linkCheck.startPackets&&!!d.telemetry;"
+    "const safe=fresh&&d.telemetry.mode===1;"
+    "const imu=fresh&&(d.telemetry.sensor_valid_mask&3)===3;"
+    "const progress='ADCS ACK '+(ack?'yes':'pending')+', fresh SAFE telemetry '+(safe?'yes':'pending')+"
+    "', gyro/accel valid '+(imu?'yes':'pending')+'.';"
+    "if(a&&a.request_id===linkCheck.id&&a.status!==0){el('command-status').textContent='Link check FAILED: '+"
+    "['','ADCS NACK','ADCS reply timeout','OBC route error','OBC-only result'][a.status];linkCheck=null;}"
+    "else if(ack&&safe&&imu){"
+    "el('command-status').textContent='Link check PASS: ADCS ACK + fresh SAFE telemetry + gyro/accel valid.';linkCheck=null;}"
+    "else if(Date.now()>linkCheck.deadline){el('command-status').textContent='Link check FAILED after 45 s: '+progress;linkCheck=null;}"
+    "else el('command-status').textContent='Link check waiting: '+progress;}"
+    "}catch(e){el('status').textContent='Web connection unavailable: '+e.message;}"
     "finally{setTimeout(refresh,500);}}refresh();"
     "document.querySelectorAll('[data-command]').forEach(button=>button.addEventListener('click',async()=>{"
-    "button.disabled=true;try{const r=await fetch('/api/command',{method:'POST',headers:{'Content-Type':'text/plain'},"
-    "body:button.dataset.command,signal:AbortSignal.timeout(5000)});"
+    "button.disabled=true;try{const checking=button.dataset.command==='linkcheck';"
+    "const r=await fetch('/api/command',{method:'POST',headers:{'Content-Type':'text/plain'},"
+    "body:checking?'safe':button.dataset.command,signal:AbortSignal.timeout(5000)});"
     "if(!r.ok)throw Error(await r.text());const d=await r.json();"
+    "lastRequest={id:d.request_id,name:button.textContent,deadline:Date.now()+45000};"
+    "linkCheck=checking?{id:d.request_id,startPackets:lastPackets,deadline:Date.now()+45000}:null;"
     "el('command-status').textContent=button.textContent+' queued (request '+d.request_id+').';"
     "}catch(e){el('command-status').textContent=e.message;}finally{button.disabled=false;}}));"
     "</script></body></html>";
@@ -152,7 +180,10 @@ static int append_float(char *out, size_t cap, size_t *used,
 static int send_telemetry(struct mg_connection *connection, web_state_t *state,
                           int head_only) {
     gs_adcs_telemetry_t t;
+    gs_command_result_t result;
     uint64_t packets, age_ms;
+    uint64_t result_age_ms;
+    int have_result;
     char json[4096];
     size_t used = 0;
 
@@ -160,13 +191,16 @@ static int send_telemetry(struct mg_connection *connection, web_state_t *state,
     t = state->telemetry;
     packets = state->packets;
     age_ms = packets ? nng_clock() - state->received_at : 0;
+    result = state->command_result;
+    have_result = state->have_command_result;
+    result_age_ms = have_result ? nng_clock() - state->command_result_at : 0;
     nng_mtx_unlock(state->mutex);
 
     if (appendf(json, sizeof(json), &used,
                 "{\"packets\":%" PRIu64 ",\"age_ms\":%" PRIu64 ",\"telemetry\":",
                 packets, age_ms) != 0) goto format_error;
     if (!packets) {
-        if (appendf(json, sizeof(json), &used, "null}\n") != 0) goto format_error;
+        if (appendf(json, sizeof(json), &used, "null") != 0) goto format_error;
     } else {
         if (appendf(json, sizeof(json), &used,
                     "{\"received_unix_us\":%" PRIu64 ",\"board_monotonic_us\":%" PRIu64
@@ -194,12 +228,24 @@ static int send_telemetry(struct mg_connection *connection, web_state_t *state,
                     "\"rejected_commands\":%" PRIu32
                     ",\"dropped_messages\":%" PRIu32 ",\"estimator_resets\":%" PRIu32
                     ",\"controller_errors\":%" PRIu32 ",\"mode_transitions\":%" PRIu32
-                    "}}\n",
+                    "}",
                     t.rejected_commands, t.dropped_messages, t.estimator_resets,
                     t.controller_errors, t.mode_transitions) != 0) goto format_error;
     }
+    if (!have_result) {
+        if (appendf(json, sizeof(json), &used, ",\"command_result\":null}\n") != 0)
+            goto format_error;
+    } else {
+        if (appendf(json, sizeof(json), &used,
+                    ",\"command_result\":{\"request_id\":%" PRIu32
+                    ",\"node\":%u,\"port\":%u,\"command_id\":%u,"
+                    "\"status\":%u,\"age_ms\":%" PRIu64 "}}\n",
+                    result.request_id, result.node, result.port,
+                    result.command_id, result.status, result_age_ms) != 0)
+            goto format_error;
+    }
     return send_response(connection, 200, "OK", "application/json", json, used, head_only);
-format_error:
+format_error:;
     static const char error[] = "Unable to format telemetry\n";
     return send_response(connection, 500, "Internal Server Error", "text/plain",
                          error, sizeof(error) - 1, head_only);
@@ -345,6 +391,14 @@ int main(void) {
             memcpy(&state.telemetry, &telemetry, sizeof(telemetry));
             state.packets++;
             state.received_at = nng_clock();
+            nng_mtx_unlock(state.mutex);
+        } else if (length == sizeof(gs_command_result_t)) {
+            gs_command_result_t result_event;
+            memcpy(&result_event, nng_msg_body(message), sizeof(result_event));
+            nng_mtx_lock(state.mutex);
+            state.command_result = result_event;
+            state.have_command_result = 1;
+            state.command_result_at = nng_clock();
             nng_mtx_unlock(state.mutex);
         } else {
             fprintf(stderr, "Dropping NNG telemetry of size %zu; expected %zu-byte struct\n",
