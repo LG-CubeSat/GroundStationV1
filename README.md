@@ -53,22 +53,34 @@ headers and library for the E22 driver. Then, from the flight repo on the Pi:
 git submodule update --init --recursive
 cmake -S . -B build-hw -DHW_MODE=ON -DBUILD_TESTS=OFF
 cmake --build build-hw -j4
+sudo systemctl stop obc.service
+sudo systemctl start pigpiod
+pigs m 25 r
+pigs pud 25 o
 session_dir=$(mktemp -d)
-MISSION_STATE_PATH="$session_dir/mission.state" \
+E22_SWAPPED_UART=1 MISSION_STATE_PATH="$session_dir/mission.state" \
   OBC_TELEMETRY_LOG_PATH="$session_dir/telemetry.bin" \
-  MISSION_ASCENT_WAIT_SEC=100000 MISSION_TELEMETRY_DOWNLINK_INTERVAL_SEC=1 \
+  MISSION_ASCENT_WAIT_SEC=100000 MISSION_TELEMETRY_DOWNLINK_INTERVAL_SEC=3 \
   MISSION_AUTONOMY_ENABLED=0 \
   ./build-hw/bin/obc_supervisor
 ```
 
 The Pi driver uses `/dev/serial0` by default and configures its E22 for 9600
 8N1 UART, 2.4 kbps air rate, transparent mode, and channel 23 (433.125 MHz).
-If the board's UART TX/RX traces are swapped, set `E22_SWAPPED_UART=1` on the
-Pi and run `pigpiod`. Set the ground E22 to matching settings before starting
+This PCB uses swapped UART TX/RX, so keep `E22_SWAPPED_UART=1` on the Pi.
+The known-good E22 AUX setup is GPIO25 as input with the internal pull disabled, shown above.
+Start `pigpiod` before setting the pin. Set the ground E22 to matching settings before starting
 the ground station. On the Mac, run `GSMain` with `E22_UART_DEVICE` as shown
 above, then run `GSEyecandy` in another terminal. Do not set `GS_SIM_RF`.
 
-Open the UI, confirm the ADCS sequence advances and telemetry age stays low,
+The default mission downlink now requests only the newest ADCS snapshot every
+3 seconds. The UI shows RF arrival age and the Pi receive timestamp age
+separately, and keeps the newest timestamp if delayed packets arrive. Sync the
+Pi and Mac clocks before using sample age or the end-to-end link check; compare
+`date -u` on both machines. Set `MISSION_TELEMETRY_MODE=history` only when you
+intend to replay the stored log.
+
+Open the UI, confirm the ADCS sequence advances and OBC sample age stays low,
 then click **Run end-to-end link check**. A PASS exercises the web UI, ground
 serial/E22, flight E22/OBC, physical I2C/CSP, ADCS command ACK, and telemetry
 back to the browser. The STM32 BMI270 driver has not been exercised on the
@@ -92,7 +104,7 @@ cmake --build build --target obc_supervisor adcs_sim
 session_dir=$(mktemp -d)
 MISSION_STATE_PATH="$session_dir/mission.state" \
   OBC_TELEMETRY_LOG_PATH="$session_dir/telemetry.bin" \
-  MISSION_ASCENT_WAIT_SEC=100000 MISSION_TELEMETRY_DOWNLINK_INTERVAL_SEC=1 \
+  MISSION_ASCENT_WAIT_SEC=100000 MISSION_TELEMETRY_DOWNLINK_INTERVAL_SEC=3 \
   MISSION_AUTONOMY_ENABLED=0 \
   ./build/bin/obc_supervisor
 

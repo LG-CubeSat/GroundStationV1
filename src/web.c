@@ -47,7 +47,8 @@ static const char index_html[] =
     "<p id='status' role='status'>Waiting for ADCS telemetry...</p>"
     "<div class='grid'>"
     "<div class='card'>Packets<strong id='packets'>0</strong></div>"
-    "<div class='card'>Last received<strong id='age'>Never</strong></div>"
+    "<div class='card'>RF received<strong id='age'>Never</strong></div>"
+    "<div class='card'>OBC sample age<strong id='sample-age'>Never</strong></div>"
     "<div class='card'>ADCS mode<strong id='mode'>—</strong></div>"
     "<div class='card'>ADCS sequence<strong id='sequence'>—</strong></div>"
     "<div class='card'>Sensor validity<strong id='sensors'>—</strong></div>"
@@ -71,15 +72,21 @@ static const char index_html[] =
     "<button data-command='photo'>Take photo</button>"
     "<p id='command-status' role='status'></p>"
     "<h2>Latest decoded record</h2><pre id='record'>Waiting...</pre>"
-    "<script>const el=id=>document.getElementById(id);let lastRequest=null,linkCheck=null,lastPackets=0;"
+    "<script>const el=id=>document.getElementById(id);let lastRequest=null,linkCheck=null,lastPackets=0,lastSampleUs=0;"
     "const modes=['BOOT','SAFE','DETUMBLE','SUN ACQUISITION','SUN POINTING','EARTH POINTING','SLEWING','TARGET POINTING','SCIENCE'];"
     "const vec=a=>a.map(x=>Number.isFinite(x)?x.toPrecision(4):'—').join(', ');"
     "async function refresh(){try{const r=await fetch('/api/telemetry',{cache:'no-store',signal:AbortSignal.timeout(5000)});"
     "if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();"
-    "lastPackets=d.packets;"
+    "lastPackets=d.packets;lastSampleUs=d.telemetry?.received_unix_us||0;"
     "el('packets').textContent=d.packets.toLocaleString();"
     "el('age').textContent=d.packets?(d.age_ms/1000).toFixed(1)+' s ago':'Never';"
-    "el('status').textContent=!d.packets?'Waiting for ADCS telemetry...':d.age_ms<5000?'Receiving ADCS telemetry':'Telemetry stale';"
+    "const sampleAgeMs=d.telemetry?Date.now()-d.telemetry.received_unix_us/1000:Infinity;"
+    "el('sample-age').textContent=!d.telemetry?'Never':"
+    "sampleAgeMs < -2000?'Check Pi/Mac clocks':"
+    "(Math.max(0,sampleAgeMs)/1000).toFixed(1)+' s';"
+    "el('status').textContent=!d.packets?'Waiting for ADCS telemetry...':"
+    "d.age_ms<5000&&sampleAgeMs>=-2000&&sampleAgeMs<10000?"
+    "'Receiving recent ADCS telemetry':'Telemetry sample stale';"
     "if(d.telemetry){const t=d.telemetry;el('mode').textContent=modes[t.mode]||t.mode;"
     "el('sequence').textContent=t.sequence;"
     "el('sensors').textContent=['gyro','accel','mag','sun'].filter((_,i)=>t.sensor_valid_mask&(1<<i)).join(', ')||'none';"
@@ -99,7 +106,10 @@ static const char index_html[] =
     "el('command-status').textContent=lastRequest.name+': no flight result within 45 s.';lastRequest=null;}"
     "if(linkCheck){const a=d.command_result;"
     "const ack=!!(a&&a.request_id===linkCheck.id&&a.status===0);"
-    "const fresh=d.packets>linkCheck.startPackets&&!!d.telemetry;"
+    "const fresh=d.packets>linkCheck.startPackets&&!!d.telemetry&&"
+    "d.telemetry.received_unix_us>linkCheck.startSampleUs&&"
+    "sampleAgeMs>=-2000&&sampleAgeMs<10000&&"
+    "d.telemetry.received_unix_us/1000>=linkCheck.sentAtMs-2000;"
     "const safe=fresh&&d.telemetry.mode===1;"
     "const imu=fresh&&(d.telemetry.sensor_valid_mask&3)===3;"
     "const progress='ADCS ACK '+(ack?'yes':'pending')+', fresh SAFE telemetry '+(safe?'yes':'pending')+"
@@ -118,7 +128,8 @@ static const char index_html[] =
     "body:checking?'safe':button.dataset.command,signal:AbortSignal.timeout(5000)});"
     "if(!r.ok)throw Error(await r.text());const d=await r.json();"
     "lastRequest={id:d.request_id,name:button.textContent,deadline:Date.now()+45000};"
-    "linkCheck=checking?{id:d.request_id,startPackets:lastPackets,deadline:Date.now()+45000}:null;"
+    "linkCheck=checking?{id:d.request_id,startPackets:lastPackets,"
+    "startSampleUs:lastSampleUs,sentAtMs:Date.now(),deadline:Date.now()+45000}:null;"
     "el('command-status').textContent=button.textContent+' queued (request '+d.request_id+').';"
     "}catch(e){el('command-status').textContent=e.message;}finally{button.disabled=false;}}));"
     "</script></body></html>";
@@ -388,9 +399,12 @@ int main(void) {
         if (length == sizeof(telemetry)) {
             memcpy(&telemetry, nng_msg_body(message), sizeof(telemetry));
             nng_mtx_lock(state.mutex);
-            memcpy(&state.telemetry, &telemetry, sizeof(telemetry));
+            if (state.packets == 0 ||
+                telemetry.received_unix_us > state.telemetry.received_unix_us) {
+                state.telemetry = telemetry;
+                state.received_at = nng_clock();
+            }
             state.packets++;
-            state.received_at = nng_clock();
             nng_mtx_unlock(state.mutex);
         } else if (length == sizeof(gs_command_result_t)) {
             gs_command_result_t result_event;
