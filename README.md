@@ -42,6 +42,43 @@ Use separate terminals for the two executables. The Mac E22 must already be
 configured for the same 9600 8N1 UART, LoRa channel, air rate, and transparent
 mode as the flight E22. `GSMain` does not configure its GPIO or E22 registers.
 
+## Check the E22 link after a wiring short
+
+Disconnect power and inspect the radio and PCB before retrying. With power off,
+check that VCC and GND are not shorted. If a component heats up or the supply
+voltage collapses when power returns, switch it off and resolve that first.
+
+Stop the running `GSMain` process so it releases the Mac USB serial port. On the
+Mac, find the USB E22 port and start the peer before the Pi test:
+
+```sh
+ls /dev/cu.usbserial*
+python3 -m pip show pyserial || python3 -m pip install pyserial
+python3 tests/radio_hardware_peer.py --port /dev/cu.usbserial-1130 --timeout 120
+```
+
+Replace the port with the one from `ls`. In the FlightSoftwareV1.1 checkout on
+the Pi, stop any manually started OBC supervisor as well as the service, then:
+
+```sh
+sudo systemctl stop obc.service
+pgrep -af 'obc_supervisor|obc_radio|radio_hardware_test'
+sudo systemctl start pigpiod
+pigs m 25 r
+pigs pud 25 o
+cmake -S . -B build-hw -DHW_MODE=ON -DBUILD_TESTS=ON
+cmake --build build-hw --target radio_hardware_test -j4
+E22_SWAPPED_UART=1 ./build-hw/bin/radio_hardware_test
+```
+
+A **PASS** means the Pi's production driver sent a CCSDS frame through its
+onboard E22, the Mac USB E22 received and echoed it, and the Pi received the
+echo. `LOCAL FAIL` is before the Mac peer matters. `Local TX completed` followed
+by `END-TO-END FAIL` means the outbound UART write completed, but the RF round
+trip was not confirmed. If the Mac shows `Received valid ...` but the Pi still
+fails, concentrate on the return path. This short-range check does not establish
+range or long-term reliability.
+
 ## Test the connected Pi and real ADCS board
 
 Leave the flashed STM32 ADCS powered and connected to the Pi I2C bus. Do not
