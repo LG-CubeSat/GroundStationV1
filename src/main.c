@@ -16,7 +16,7 @@
 #include "serial.h"
 #include "../lib/SSDV/ssdv.h"
 
-#define RADIO_BUFFER_SIZE UINT16_MAX
+#define TELEMETRY_MAX_DECODED 4096 // biggest decompressed telemetry we'll accept
 
 typedef struct {
     nng_socket publisher;
@@ -103,16 +103,16 @@ static void finish_image(receive_context_t *context, int recovered) {
 }
 
 static void receive_ssdv(receive_context_t *context, const uint8_t *data, size_t length) {
-    uint8_t packet[SSDV_PKT_SIZE];
+    uint8_t packet[SSDV_PKT_SIZE]; // ssdv's max size, flight packets only use the first 214
     ssdv_packet_info_t info;
     int status;
 
-    if (length != sizeof(packet)) {
+    if (length != LG_CCSDS_SSDV_PACKET_SIZE) {
         fprintf(stderr, "Dropping SSDV payload of invalid size: %zu\n", length);
         return;
     }
-    memcpy(packet, data, sizeof(packet));
-    if (ssdv_dec_is_packet(packet, sizeof(packet), NULL) != SSDV_OK) {
+    memcpy(packet, data, LG_CCSDS_SSDV_PACKET_SIZE);
+    if (ssdv_dec_is_packet(packet, LG_CCSDS_SSDV_PACKET_SIZE, NULL) != SSDV_OK) {
         fprintf(stderr, "Dropping invalid SSDV packet\n");
         return;
     }
@@ -133,7 +133,7 @@ static void receive_ssdv(receive_context_t *context, const uint8_t *data, size_t
 
         finish_image(context, 1);
         reset_image(context);
-        if (ssdv_dec_init(&context->decoder, SSDV_PKT_SIZE) != SSDV_OK) {
+        if (ssdv_dec_init(&context->decoder, LG_CCSDS_SSDV_PACKET_SIZE) != SSDV_OK) {
             fprintf(stderr, "Unable to initialize SSDV decoder\n");
             return;
         }
@@ -197,9 +197,28 @@ static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void 
         return CCSDS_OK;
     }
 
-    rv = nng_msg_alloc(&message, view.data_length);
+    const uint8_t *payload = view.payload;
+    size_t payload_length = view.payload_length;
+    uint8_t decoded[TELEMETRY_MAX_DECODED];
+
+    // the ui only understands raw telemetry, so decompress before publishing
+    if (view.metadata.content_type == LG_CCSDS_CONTENT_COMPRESSED_TELEMETRY) {
+        size_t decoded_length = 0;
+        status = ccsds_121_decode(&view.metadata.compression, view.payload, view.payload_length,
+                                  view.metadata.item_count, decoded, sizeof(decoded), &decoded_length);
+        if (status != CCSDS_OK) {
+            fprintf(stderr, "Dropping compressed telemetry that won't decode: %s\n",
+                    ccsds_status_string(status));
+            return;
+        }
+        payload = decoded;
+        payload_length = decoded_length;
+    }
+
+    // telemetry goes out to the ui over nng
+    rv = nng_msg_alloc(&message, payload_length);
     if (rv == 0) {
-        memcpy(nng_msg_body(message), view.data, view.data_length);
+        memcpy(nng_msg_body(message), payload, payload_length);
         rv = nng_sendmsg(context->publisher, message, NNG_FLAG_NONBLOCK);
         if (rv != 0) nng_msg_free(message);
     }
@@ -208,17 +227,7 @@ static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void 
     return CCSDS_OK;
 }
 
-static int send_command(nng_msg *message, uint16_t *sequence) {
-    uint8_t packet[CCSDS_SPACE_PACKET_PRIMARY_HEADER_SIZE + sizeof(groundstation_command_packet_t)];
-    size_t packet_length;
-    ccsds_space_packet_header_t header = {
-        .type = CCSDS_PACKET_TYPE_COMMAND,
-        .has_secondary_header = false,
-        .apid = LG_CCSDS_APID_COMMAND,
-        .sequence_flags = CCSDS_SEQUENCE_UNSEGMENTED,
-        .sequence_count = *sequence
-    };
-    ccsds_status_t status;
+static int send_command(nng_msg *message) {
     int rv;
 
     if (nng_msg_len(message) != sizeof(groundstation_command_packet_t)) {
@@ -226,18 +235,11 @@ static int send_command(nng_msg *message, uint16_t *sequence) {
                 nng_msg_len(message), sizeof(groundstation_command_packet_t));
         return 0;
     }
-    status = ccsds_space_packet_build(&header, nng_msg_body(message), nng_msg_len(message),
-                                      packet, sizeof(packet), &packet_length);
-    if (status != CCSDS_OK) {
-        fprintf(stderr, "Unable to build CCSDS command: %s\n", ccsds_status_string(status));
-        return -1;
-    }
-    rv = radio_send(packet, packet_length);
+    rv = radio_send_command(nng_msg_body(message), nng_msg_len(message));
     if (rv < 0) {
         fprintf(stderr, "Radio send failed (%d); command transmission is uncertain\n", rv);
         return -1;
     }
-    *sequence = (uint16_t)((*sequence + 1U) & CCSDS_SPACE_PACKET_MAX_SEQUENCE_COUNT);
     return 0;
 }
 
@@ -249,7 +251,6 @@ int main(void) {
     nng_socket commands = NNG_SOCKET_INITIALIZER;
     int publisher_open = 0, commands_open = 0;
     int result = EXIT_FAILURE, rv;
-    uint16_t sequence = 0;
     nng_time radio_retry_at = 0;
     ccsds_status_t status;
 
@@ -298,7 +299,7 @@ int main(void) {
 
         rv = nng_recvmsg(commands, &message, NNG_FLAG_NONBLOCK);
         if (rv == 0) {
-            int sent = send_command(message, &sequence);
+            int sent = send_command(message);
             nng_msg_free(message);
             if (sent != 0) goto cleanup;
             did_work = 1;
