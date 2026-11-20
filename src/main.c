@@ -187,6 +187,10 @@ static void receive_packet(receive_context_t *context, const uint8_t *packet, si
         fprintf(stderr, "Dropping command packet, ground station doesn't take commands\n");
         return;
     }
+    if (view.header.apid != LG_CCSDS_APID_RAW_TELEMETRY) {
+        fprintf(stderr, "Dropping packet without telemetry or SSDV APID\n");
+        return CCSDS_OK;
+    }
 
     const uint8_t *payload = view.payload;
     size_t payload_length = view.payload_length;
