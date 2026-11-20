@@ -179,7 +179,7 @@ static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void 
         fprintf(stderr, "Dropping invalid CCSDS packet: %s\n", ccsds_status_string(status));
         return CCSDS_OK;
     }
-    if (view.space_packet.total_length != length || view.space_packet.header.has_secondary_header ||
+    if (view.space_packet.total_length != length || !view.space_packet.header.has_secondary_header ||
         view.space_packet.header.sequence_flags != CCSDS_SEQUENCE_UNSEGMENTED) {
         fprintf(stderr, "Dropping CCSDS packet with unexpected framing or payload length\n");
         return CCSDS_OK;
@@ -189,11 +189,12 @@ static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void 
             fprintf(stderr, "Dropping SSDV APID with command packet type\n");
             return CCSDS_OK;
         }
-        receive_ssdv(context, view.space_packet.data, sizeof(view.space_packet.data));
+        receive_ssdv(context, view.payload, view.payload_length);
         return CCSDS_OK;
     }
-    if (view.space_packet.header.apid != LG_CCSDS_APID_RAW_TELEMETRY) {
-        fprintf(stderr, "Dropping packet without telemetry or SSDV APID\n");
+    if (view.space_packet.header.apid != LG_CCSDS_APID_RAW_TELEMETRY &&
+        view.space_packet.header.apid != LG_CCSDS_APID_COMPRESSED_TELEMETRY) {
+        fprintf(stderr, "Dropping packet without telemetry APID\n");
         return CCSDS_OK;
     }
 
@@ -276,6 +277,13 @@ int main(void) {
     int result = EXIT_FAILURE, rv;
     nng_time radio_retry_at = 0;
     ccsds_status_t status;
+
+    status = ccsds_stream_parser_init(&parser, packet_storage, sizeof(packet_storage));
+    if (status != CCSDS_OK) {
+        fprintf(stderr, "Unable to initialize CCSDS stream parser: %s\n",
+                ccsds_status_string(status));
+        goto cleanup;
+    }
 
     if (gs_radio_init() != 0) {
         fprintf(stderr, "Radio transport could not start\n");
