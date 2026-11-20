@@ -16,13 +16,14 @@
 ### goals (revised)
 - What does a ground station do? "TT&C"
     - [ ] telemetry (downlink)
-        - [ ] recieving (radio) - integrate avi filter?
+        - [ ] recieving (radio)
+            - [ ] integrate avi filter?
         - [ ] parsing/decoding
             - [ ] figure out wtf packet police is
         - [ ] control center (website)
             - [ ] learn how tf to use html
-            - [ ] display jpeg images
             - [ ] human made ui
+            - [ ] display jpeg images
             - [ ] crash recovery
                 - [ ] decompression as well once compression in backup system
             - [x] research what an acds telemetry packet looks like

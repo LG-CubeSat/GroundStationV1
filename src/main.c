@@ -170,34 +170,29 @@ static void receive_ssdv(receive_context_t *context, const uint8_t *data, size_t
 
 static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void *user_context) {
     receive_context_t *context = user_context;
-    ccsds_space_packet_view_t view;
+    lg_ccsds_profile_view_t view;
     nng_msg *message;
     int rv;
-    ccsds_status_t status = ccsds_space_packet_parse(packet, length, &view);
+    ccsds_status_t status = lg_ccsds_profile_parse(packet, length, &view);
 
     if (status != CCSDS_OK) {
         fprintf(stderr, "Dropping invalid CCSDS packet: %s\n", ccsds_status_string(status));
         return CCSDS_OK;
     }
-    if (view.total_length != length || view.header.has_secondary_header ||
-        view.header.sequence_flags != CCSDS_SEQUENCE_UNSEGMENTED) {
+    if (view.space_packet.total_length != length || view.space_packet.header.has_secondary_header ||
+        view.space_packet.header.sequence_flags != CCSDS_SEQUENCE_UNSEGMENTED) {
         fprintf(stderr, "Dropping CCSDS packet with unexpected framing or payload length\n");
         return CCSDS_OK;
     }
-    if (view.header.apid == LG_CCSDS_APID_SSDV) {
-        groundstation_ssdv_packet_t payload;
-        if (view.header.type != CCSDS_PACKET_TYPE_TELEMETRY) {
+    if (view.space_packet.header.apid == LG_CCSDS_APID_SSDV) {
+        if (view.space_packet.header.type != CCSDS_PACKET_TYPE_TELEMETRY) {
             fprintf(stderr, "Dropping SSDV APID with command packet type\n");
             return CCSDS_OK;
         }
-        if (deserialize_ssdv(view.data, view.data_length, &payload) != SERIAL_OK) {
-            fprintf(stderr, "Dropping SSDV payload of invalid size: %zu\n", view.data_length);
-            return CCSDS_OK;
-        }
-        receive_ssdv(context, payload.data, sizeof(payload.data));
+        receive_ssdv(context, view.space_packet.data, sizeof(view.space_packet.data));
         return CCSDS_OK;
     }
-    if (view.header.apid != LG_CCSDS_APID_RAW_TELEMETRY) {
+    if (view.space_packet.header.apid != LG_CCSDS_APID_RAW_TELEMETRY) {
         fprintf(stderr, "Dropping packet without telemetry or SSDV APID\n");
         return CCSDS_OK;
     }
@@ -214,7 +209,7 @@ static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void 
         if (status != CCSDS_OK) {
             fprintf(stderr, "Dropping compressed telemetry that won't decode: %s\n",
                     ccsds_status_string(status));
-            return;
+            return CCSDS_OK;
         }
         payload = decoded;
         payload_length = decoded_length;
@@ -234,7 +229,7 @@ static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void 
         event_length = sizeof(telemetry);
     } else {
         fprintf(stderr, "Dropping unsupported telemetry record (%zu bytes)\n", payload_length);
-        return;
+        return CCSDS_OK;
     }
 
     rv = nng_msg_alloc(&message, event_length);
@@ -272,7 +267,7 @@ static int send_command(nng_msg *message) {
 }
 
 int main(void) {
-    uint8_t radio_buffer[RADIO_BUFFER_SIZE];
+    uint8_t radio_buffer[RADIO_MAX_PACKET_SIZE];
     uint8_t packet_storage[CCSDS_SPACE_PACKET_MAX_TOTAL_SIZE];
     ccsds_stream_parser_t parser;
     receive_context_t context = {.publisher = NNG_SOCKET_INITIALIZER};
@@ -308,7 +303,7 @@ int main(void) {
 
         if (nng_clock() >= radio_retry_at) {
             // radio_receive_packet hands back one whole checked packet at a time
-            int received = gs_radio_receive_packet(radio_packet, (uint16_t)sizeof(radio_packet));
+            int received = gs_radio_receive_packet(radio_buffer, (uint16_t)sizeof(radio_buffer));
             if (received < 0) {
                 fprintf(stderr, "Radio receive failed (%d)\n", received);
                 radio_retry_at = nng_clock() + 250U;

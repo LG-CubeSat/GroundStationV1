@@ -4,8 +4,8 @@ project(GroundStation LANGUAGES C)
 # Libraries
 set(NNG_TESTS OFF CACHE BOOL "Build NNG tests" FORCE)
 add_subdirectory(lib/nng)
-add_subdirectory(lib/radio)
 add_subdirectory(lib/ccsds)
+add_subdirectory(lib/radio)
 find_package(OpenSSL REQUIRED)
 add_subdirectory(lib/curl)
 if(TARGET libcurl_static)
@@ -51,8 +51,3 @@ if(TARGET libcurl_static)
     target_include_directories(libcurl_static BEFORE PRIVATE "${OPENSSL_INCLUDE_DIR}")
 endif()
 target_link_libraries(GSBackup PRIVATE nng GroundStationSerial CURL::libcurl Threads::Threads)
-
-# Test Slop
-add_executable(GSTest src/test.c)
-target_compile_features(GSTest PRIVATE c_std_11)
-target_link_libraries(GSTest PRIVATE nng ccsds GroundStationSerial civetweb-c-library)

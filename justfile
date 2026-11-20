@@ -12,7 +12,8 @@ build:
     cmake --build build
 
 test:
-    socat -d -d pty,rawer,link=/tmp/gs-tx pty,rawer,link=/tmp/gs-rx & 
+    socat -d -d pty,rawer,link=/tmp/gs-tx pty,rawer,link=/tmp/gs-rx &
+    until [ -e /tmp/gs-rx ]; do sleep 0.1; done
     E22_UART_DEVICE=/tmp/gs-rx ./build/GSMain &
     ./build/GSEyecandy &
     python3 src/test.py --port /tmp/gs-tx --count 0 &
