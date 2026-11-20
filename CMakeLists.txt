@@ -4,6 +4,7 @@ project(GroundStation LANGUAGES C)
 # Libraries
 set(NNG_TESTS OFF CACHE BOOL "Build NNG tests" FORCE)
 add_subdirectory(lib/nng)
+add_subdirectory(lib/ccsds) # before radio so RadioHandler uses this ccsds instead of its own copy
 add_subdirectory(lib/radio)
 add_subdirectory(lib/ccsds)
 add_subdirectory(lib/curl)
@@ -30,8 +31,8 @@ find_package(Threads REQUIRED)
 # Prod Executables
 add_executable(GSMain src/main.c)
 target_compile_features(GSMain PRIVATE c_std_11)
-target_include_directories(GSMain PRIVATE lib/ccsds/include lib/nng/include lib/radio)
-target_link_libraries(GSMain PRIVATE ccsds radio nng GroundStationSerial SSDV)
+target_include_directories(GSMain PRIVATE lib/ccsds/include lib/nng/include)
+target_link_libraries(GSMain PRIVATE ccsds RadioHandler nng GroundStationSerial SSDV)
 
 # Web executable uses NNG and CivetWeb libraries
 add_executable(GSEyecandy src/web.c)
