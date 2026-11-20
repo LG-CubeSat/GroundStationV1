@@ -26,6 +26,10 @@ add_library(GroundStationSerial STATIC lib/serial.c)
 target_include_directories(GroundStationSerial PUBLIC lib)
 target_compile_features(GroundStationSerial PUBLIC c_std_11)
 
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+find_package(Threads REQUIRED)
+
 # Prod Executables
 add_executable(GSMain src/main.c)
 target_compile_features(GSMain PRIVATE c_std_11)
@@ -40,7 +44,10 @@ target_link_libraries(GSEyecandy PRIVATE nng civetweb-c-library GroundStationSer
 # Backup
 add_executable(GSBackup src/backup.c)
 target_compile_features(GSBackup PRIVATE c_std_11)
-target_link_libraries(GSBackup PRIVATE nng GroundStationSerial CURL::libcurl)
+if(TARGET libcurl_static)
+    target_include_directories(libcurl_static BEFORE PRIVATE "${OPENSSL_INCLUDE_DIR}")
+endif()
+target_link_libraries(GSBackup PRIVATE nng GroundStationSerial CURL::libcurl Threads::Threads)
 
 # Test Slop
 add_executable(GSTest src/test.c)
