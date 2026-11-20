@@ -12,8 +12,9 @@
 
 #include "ccsds/ccsds.h"
 #include "groundstation_message.h"
+#include "flight_protocol.h"
+#include "radio_transport.h"
 #include "radio.h"
-#include "serial.h"
 #include "../lib/SSDV/ssdv.h"
 
 #define TELEMETRY_MAX_DECODED 4096 // biggest decompressed telemetry we'll accept
@@ -219,10 +220,26 @@ static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void 
         payload_length = decoded_length;
     }
 
-    // telemetry goes out to the ui over nng
-    rv = nng_msg_alloc(&message, payload_length);
+    gs_adcs_telemetry_t telemetry;
+    gs_command_result_t result;
+    const void *event;
+    size_t event_length;
+    if (gs_decode_command_result(payload, payload_length, &result) == 0) {
+        event = &result;
+        event_length = sizeof(result);
+        fprintf(stderr, "RF command result: request=%u node=%u command=%u status=%u\n",
+                result.request_id, result.node, result.command_id, result.status);
+    } else if (gs_decode_adcs_record(payload, payload_length, &telemetry) == 0) {
+        event = &telemetry;
+        event_length = sizeof(telemetry);
+    } else {
+        fprintf(stderr, "Dropping unsupported telemetry record (%zu bytes)\n", payload_length);
+        return;
+    }
+
+    rv = nng_msg_alloc(&message, event_length);
     if (rv == 0) {
-        memcpy(nng_msg_body(message), payload, payload_length);
+        memcpy(nng_msg_body(message), event, event_length);
         rv = nng_sendmsg(context->publisher, message, NNG_FLAG_NONBLOCK);
         if (rv != 0) nng_msg_free(message);
     }
@@ -233,13 +250,20 @@ static ccsds_status_t receive_packet(const uint8_t *packet, size_t length, void 
 
 static int send_command(nng_msg *message) {
     int rv;
+    gs_command_request_t request;
+    uint8_t payload[14];
+    size_t length = 0;
 
-    if (nng_msg_len(message) != sizeof(groundstation_command_packet_t)) {
-        fprintf(stderr, "Dropping NNG command of size %zu; expected %zu-byte struct\n",
-                nng_msg_len(message), sizeof(groundstation_command_packet_t));
+    if (nng_msg_len(message) != sizeof(request)) {
+        fprintf(stderr, "Dropping NNG command of size %zu\n", nng_msg_len(message));
         return 0;
     }
-    rv = radio_send_command(nng_msg_body(message), nng_msg_len(message));
+    memcpy(&request, nng_msg_body(message), sizeof(request));
+    if (gs_build_command(&request, payload, sizeof(payload), &length) != 0) {
+        fprintf(stderr, "Dropping unknown ground command kind %u\n", request.kind);
+        return 0;
+    }
+    rv = gs_radio_send_command(payload, length);
     if (rv < 0) {
         fprintf(stderr, "Radio send failed (%d); command transmission is uncertain\n", rv);
         return -1;
@@ -258,9 +282,8 @@ int main(void) {
     nng_time radio_retry_at = 0;
     ccsds_status_t status;
 
-    status = ccsds_stream_parser_init(&parser, packet_storage, sizeof(packet_storage));
-    if (status != CCSDS_OK) {
-        fprintf(stderr, "Unable to initialize CCSDS parser: %s\n", ccsds_status_string(status));
+    if (gs_radio_init() != 0) {
+        fprintf(stderr, "Radio transport could not start\n");
         goto cleanup;
     }
     if ((rv = nng_pub0_open(&context.publisher)) != 0) goto nng_error;
@@ -269,7 +292,7 @@ int main(void) {
     if ((rv = nng_pull0_open(&commands)) != 0) goto nng_error;
     commands_open = 1;
     if ((rv = nng_socket_set_size(commands, NNG_OPT_RECVMAXSZ,
-                                   sizeof(groundstation_command_packet_t))) != 0)
+                                   sizeof(gs_command_request_t))) != 0)
         goto nng_error;
     if ((rv = nng_listen(commands, GROUNDSTATION_COMMAND_NNG_URL, NULL, 0)) != 0) goto nng_error;
 
@@ -284,10 +307,10 @@ int main(void) {
         nng_msg *message = NULL;
 
         if (nng_clock() >= radio_retry_at) {
-            int received = radio_receive(radio_buffer, (uint16_t)sizeof(radio_buffer));
-            if (received < 0 || (size_t)received > sizeof(radio_buffer)) {
-                fprintf(stderr, "Radio receive failed or returned invalid length (%d)\n", received);
-                ccsds_stream_parser_reset(&parser);
+            // radio_receive_packet hands back one whole checked packet at a time
+            int received = gs_radio_receive_packet(radio_packet, (uint16_t)sizeof(radio_packet));
+            if (received < 0) {
+                fprintf(stderr, "Radio receive failed (%d)\n", received);
                 radio_retry_at = nng_clock() + 250U;
             } else if (received > 0) {
                 size_t delivered = 0U;
@@ -318,6 +341,7 @@ int main(void) {
 nng_error:
     fprintf(stderr, "NNG error: %s\n", nng_strerror(rv));
 cleanup:
+    gs_radio_close();
     if (commands_open) (void)nng_close(commands);
     if (publisher_open) (void)nng_close(context.publisher);
     finish_image(&context, 1);

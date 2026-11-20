@@ -1,24 +1,15 @@
 #!/usr/bin/env python3
-"""Send test telemetry to GroundStation over a serial link (macOS/Linux).
+"""Send flight-shaped ADCS telemetry to a GS serial port or print a sample.
 
-Examples:
-    python3 src/test.py --port /dev/cu.usbserial-XXXX
-    python3 src/test.py --port /dev/ttyUSB0 --count 0 --interval 1
     python3 src/test.py --dry-run --count 1
+    python3 src/test.py --port /tmp/gs-tx --count 0
 
-Use the transmitting adapter connected to the ground station's receiver, or
-the other end of a paired virtual serial link. The E22 must already be in
-transparent mode with matching radio settings and M0/M1 held low. This script
-does not configure the radio's GPIO or registers. No third-party packages needed.
-
-Wire format: 6-byte CCSDS header + 16-byte LG profile header + 20-byte packed
-telemetry + 4-byte CRC-32. Headers/CRC are big-endian; telemetry is little-endian.
-See lib/ccsds/src/profile.c, lib/serial.h, and src/main.c.
+The 228-byte frame is CCSDS + LG profile + WESW record + ADCS v3 + CRC-32.
+It fits the E22 240-byte air packet. No third-party packages are needed.
 """
 
 import argparse
 import contextlib
-import math
 import os
 import select
 import struct
@@ -29,46 +20,35 @@ import tty
 import zlib
 
 
-def integer_range(minimum, maximum):
-    def parse(value):
-        number = int(value)
-        if not minimum <= number <= maximum:
-            raise argparse.ArgumentTypeError(f"must be {minimum} through {maximum}")
-        return number
+def telemetry_packet(sequence: int) -> bytes:
+    adcs = bytearray(184)
+    adcs[:4] = b"ADCS"
+    adcs[4] = 3
+    adcs[5] = 1  # SAFE
+    struct.pack_into(">I", adcs, 8, sequence)
+    struct.pack_into(">Q", adcs, 12, int(time.monotonic() * 1_000_000))
+    struct.pack_into(">I", adcs, 20, 3)  # gyro + accelerometer valid
+    struct.pack_into(">4f", adcs, 28, 0, 0, 0, 1)
+    struct.pack_into(">4f", adcs, 44, 0, 0, 0, 1)
+    struct.pack_into(">3f", adcs, 60, 0.01 * sequence, 0.02, 0.03)
+    struct.pack_into(">f", adcs, 112, 0.95)
+    struct.pack_into(">f", adcs, 180, 92)
 
-    return parse
+    record = bytearray(202)
+    record[:4] = b"WESW"
+    record[4:8] = bytes((1, 2, 20, 0))
+    struct.pack_into(">QH", record, 8, int(time.time() * 1_000_000), len(adcs))
+    record[18:] = adcs
 
-
-def finite_float(value):
-    number = float(value)
-    if not math.isfinite(number):
-        raise argparse.ArgumentTypeError("must be finite")
-    return number
-
-
-def float32(value):
-    number = finite_float(value)
-    try:
-        struct.pack("<f", number)
-    except (OverflowError, struct.error):
-        raise argparse.ArgumentTypeError("must fit in a 32-bit float") from None
-    return number
-
-
-def telemetry_packet(test_run, sample, temperature_c, battery_v, altitude_m, sequence):
-    """Match serialize_telemetry() and lg_ccsds_profile_build(raw, seq, 1, ...)."""
-    payload = struct.pack("<IIffi", test_run, sample, temperature_c, battery_v, altitude_m)
-    # Version 1, raw telemetry (content 0), no compression, one item.
-    profile = struct.pack(">BB6xII", 1, 0, 1, len(payload))
-    data_length = len(profile) + len(payload) + 4
-    # Version 0, telemetry APID 0x001, secondary header, unsegmented sequence.
+    profile = struct.pack(">BB6xII", 1, 0, 1, len(record))
+    data_length = len(profile) + len(record) + 4
     header = struct.pack(">HHH", 0x0801, 0xC000 | (sequence & 0x3FFF), data_length - 1)
-    packet = header + profile + payload
+    packet = header + profile + record
     return packet + struct.pack(">I", zlib.crc32(packet) & 0xFFFFFFFF)
 
 
 @contextlib.contextmanager
-def serial_port(path, baud):
+def serial_port(path: str, baud: int):
     fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     original = None
     try:
@@ -81,17 +61,14 @@ def serial_port(path, baud):
         termios.tcsetattr(fd, termios.TCSANOW, settings)
         yield fd
     finally:
-        try:
-            if original is not None:
-                termios.tcsetattr(fd, termios.TCSANOW, original)
-        finally:
-            os.close(fd)
+        if original is not None:
+            termios.tcsetattr(fd, termios.TCSANOW, original)
+        os.close(fd)
 
 
-def write_packet(fd, packet):
-    """Finish partial writes without adding delimiters or gaps within a frame."""
+def write_packet(fd: int, packet: bytes):
     remaining = memoryview(packet)
-    deadline = time.monotonic() + 5.0
+    deadline = time.monotonic() + 5
     while remaining:
         timeout = deadline - time.monotonic()
         if timeout <= 0 or not select.select([], [fd], [], timeout)[1]:
@@ -106,60 +83,40 @@ def write_packet(fd, packet):
     termios.tcdrain(fd)
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument("--port", default=os.environ.get("E22_UART_DEVICE"),
-                        help="transmitting serial device (default: E22_UART_DEVICE)")
-    parser.add_argument("--baud", type=int, default=9600, help="UART baud rate (default: 9600)")
-    parser.add_argument("--count", type=integer_range(0, sys.maxsize), default=10,
-                        help="packets to send; 0 runs until Ctrl-C (default: 10)")
-    parser.add_argument("--interval", type=finite_float, default=1.0,
-                        help="seconds between completed writes (default: 1)")
-    parser.add_argument("--test-run", type=integer_range(0, 0xFFFFFFFF),
-                        default=int(time.time()) & 0xFFFFFFFF, help="run ID (default: Unix time)")
-    parser.add_argument("--sample", type=integer_range(0, 0xFFFFFFFF), default=0,
-                        help="first sample number; increments each packet (default: 0)")
-    parser.add_argument("--sequence", type=integer_range(0, 0x3FFF), default=0,
-                        help="first CCSDS sequence; wraps at 16384 (default: 0)")
-    parser.add_argument("--temperature", type=float32, default=22.5, help="temperature in C")
-    parser.add_argument("--battery", type=float32, default=4.1, help="battery voltage")
-    parser.add_argument("--altitude", type=integer_range(-0x80000000, 0x7FFFFFFF),
-                        default=100, help="altitude in meters")
-    parser.add_argument("--dry-run", action="store_true", help="print packet hex without opening a port")
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", default=os.environ.get("E22_UART_DEVICE"))
+    parser.add_argument("--baud", type=int, default=9600)
+    parser.add_argument("--count", type=int, default=10, help="0 means continuous")
+    parser.add_argument("--interval", type=float, default=1.0)
+    parser.add_argument("--sequence", type=int, default=0)
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
-    if args.interval < 0:
-        parser.error("--interval must be nonnegative")
+    if args.count < 0 or args.interval < 0 or not 0 <= args.sequence <= 0x3FFF:
+        parser.error("invalid count, interval, or sequence")
     if args.baud <= 0 or not hasattr(termios, f"B{args.baud}"):
-        parser.error("--baud is not supported on this system")
+        parser.error("unsupported baud rate")
     if not args.dry_run and not args.port:
         parser.error("provide --port or set E22_UART_DEVICE")
 
     connection = contextlib.nullcontext(None) if args.dry_run else serial_port(args.port, args.baud)
     try:
         with connection as fd:
-            if fd is not None:
-                print(f"Sending telemetry to {args.port} at {args.baud} baud, 8N1", flush=True)
             sent = 0
             while args.count == 0 or sent < args.count:
-                sample = (args.sample + sent) & 0xFFFFFFFF
                 sequence = (args.sequence + sent) & 0x3FFF
-                packet = telemetry_packet(args.test_run, sample, args.temperature,
-                                          args.battery, args.altitude, sequence)
+                packet = telemetry_packet(sequence)
                 if fd is not None:
                     write_packet(fd, packet)
-                print(f"{'Preview' if args.dry_run else 'Sent'} run={args.test_run} "
-                      f"sample={sample} seq={sequence} bytes={len(packet)} "
-                      f"hex={packet.hex()}", flush=True)
+                print(f"{'Preview' if args.dry_run else 'Sent'} ADCS sequence={sequence} "
+                      f"bytes={len(packet)} hex={packet.hex()}", flush=True)
                 sent += 1
                 if args.count == 0 or sent < args.count:
                     time.sleep(args.interval)
     except KeyboardInterrupt:
-        print("\nStopped.", file=sys.stderr)
         return 130
-    except (OSError, termios.error) as error:
-        print(f"Serial error: {error}", file=sys.stderr)
+    except (OSError, termios.error) as exc:
+        print(f"Serial error: {exc}", file=sys.stderr)
         return 1
     return 0
 
