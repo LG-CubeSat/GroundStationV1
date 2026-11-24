@@ -21,7 +21,8 @@
         - [ ] parsing/decoding
             - [ ] figure out wtf packet police is
         - [ ] control center (website)
-            - [ ] learn how tf to use html
+            - [x] learn how tf to use html
+            - [x] build html from external file instead of giant string
             - [ ] human made ui
             - [ ] display jpeg images
             - [ ] crash recovery
@@ -55,7 +56,8 @@
                     uint32_t controller_errors;
                     uint32_t mode_transitions;
                     float minimum_stack_margin_words;
-            - [ ] put ALL this information on website
+            - [x] put ALL this information on website
+                - wesley and/or claude alr did apparently
         - [ ] storage (backup)
             - [ ] rework storage to use flight_protocol over serial
             - [ ] compression of files before storage
@@ -73,7 +75,7 @@
             - i sure hope so i dont want to do all this
         - [ ] figure out when satellite in range and not, communicate to backup
         - [ ] physical movement - need hardware to point antenna toward satellite
-    - [ ] command (uplink)
+    - [x] command (uplink)
         - [x] control center (website)
         - [x] encoding
         - [x] sending (radio)
@@ -84,6 +86,7 @@
 - Old tasks from nov 6 phase
     - [ ] Main: Packet Police
         - so theres a branch called "packet police" in github, gonna check that mayb
+        - so apparently its kinda integrated in main.c but maybe check through everything it does and make sure its working
     - [ ] Web: File Auto-embedder
         - wtf does that mean? is this displaying jpeg?
     - [ ] Web: The Eyecandy

@@ -34,14 +34,14 @@ static void request_shutdown(int signal_number) {
     keep_running = 0;
 }
 
-void nng_msg_full_free(nng_msg **message) {
+static void nng_msg_full_free(nng_msg **message) {
     if (message != NULL && *message != NULL) {
         nng_msg_free(*message);
         *message = NULL;
     }
 }
 
-size_t http_callback(char *data, size_t size, size_t count, void *arg) {
+static size_t http_callback(char *data, size_t size, size_t count, void *arg) {
     return size * count;
 }
 
@@ -68,7 +68,7 @@ int write_telemetry(const void *data, size_t len) {
     return 0;
 }
 
-int read_telemetry(void *buffer) {
+static int read_telemetry(void *buffer) {
     FILE* file = fopen(BACKUP_ADDRESS, "rb");
     if (file == NULL) {
         fprintf(stderr, "Unable to open backup file for reading\n");
@@ -89,7 +89,7 @@ int read_telemetry(void *buffer) {
     return 0;
 }
 
-int free_telemetry() {
+static int free_telemetry() {
     FILE* file = fopen(BACKUP_ADDRESS, "rb");
     if (file == NULL) {
         fprintf(stderr, "Unable to open backup file for reading\n");
@@ -144,7 +144,7 @@ int free_telemetry() {
     return 0;
 }
 
-CURLcode upload_telemetry(backup_context_t *context) {
+static CURLcode upload_telemetry(backup_context_t *context) {
     CURL *handle;
     CURLcode curl_rv;
     struct curl_slist *headers = NULL;
@@ -231,7 +231,7 @@ CURLcode upload_telemetry(backup_context_t *context) {
     return CURLE_OK;
 }
 
-long get_packets_saved() {
+static long get_packets_saved() {
     long packet_count = 0;
     FILE *file = fopen(BACKUP_ADDRESS, "rb");
     if (file == NULL) {

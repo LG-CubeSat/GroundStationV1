@@ -16,6 +16,7 @@
 #include "flight_protocol.h"
 
 #define HTTP_ADDRESS "127.0.0.1:8080"
+#define UI_HTML_ADDRESS "../slop/slop.html"
 
 typedef struct {
     nng_mtx *mutex;
@@ -26,11 +27,13 @@ typedef struct {
     gs_command_result_t command_result;
     nng_time command_result_at;
     int have_command_result;
+    char *html_ptr;
+    size_t html_length;
 } web_state_t;
 
 static volatile sig_atomic_t keep_running = 1;
 
-// HTML FILE Absoloutely slopped together into here. In future: Make a script that automatically compiles an html file into here.
+/* // old slop html, moved to index.html
 static const char index_html[] =
     "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -133,6 +136,7 @@ static const char index_html[] =
     "el('command-status').textContent=button.textContent+' queued (request '+d.request_id+').';"
     "}catch(e){el('command-status').textContent=e.message;}finally{button.disabled=false;}}));"
     "</script></body></html>";
+*/
 
 static void request_shutdown(int signal_number) {
     (void)signal_number;
@@ -186,6 +190,42 @@ static int append_float(char *out, size_t cap, size_t *used,
     if (isfinite(value))
         return appendf(out, cap, used, "\"%s\":%.9g,", name, (double)value);
     return appendf(out, cap, used, "\"%s\":null,", name);
+}
+
+static int build_html(const char *filename, web_state_t *state) {
+    FILE *file = fopen(filename, "rb");
+    if (file == NULL) {
+        return -1;
+    }
+
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return -1;
+    }
+    state->html_length = (size_t)ftell(file);
+    if (state->html_length < 0) {
+        fclose(file);
+        return -1;
+    }
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return -1;
+    }
+
+    state->html_ptr = malloc(state->html_length + 1);
+    if (fread(state->html_ptr, 1, state->html_length, file) < state->html_length) {
+        free(state->html_ptr);
+        fclose(file);
+        return -1;
+    }
+    state->html_ptr[state->html_length] = '\0';
+
+    if (fclose(file) != 0) {
+        free(state->html_ptr);
+        return -1;
+    }
+
+    return 0;
 }
 
 static int send_telemetry(struct mg_connection *connection, web_state_t *state,
@@ -310,6 +350,7 @@ static int handle_request(struct mg_connection *connection) {
     web_state_t *state = request->user_data;
     const char *uri = request->local_uri;
     int head_only = strcmp(request->request_method, "HEAD") == 0;
+    const char index_html = *state->html_ptr;
 
     if (uri != NULL && strcmp(uri, "/api/command") == 0) {
         if (strcmp(request->request_method, "POST") == 0)
@@ -330,7 +371,7 @@ static int handle_request(struct mg_connection *connection) {
         return send_telemetry(connection, state, head_only);
     if (uri != NULL && (strcmp(uri, "/") == 0 || strcmp(uri, "/index.html") == 0))
         return send_response(connection, 200, "OK", "text/html; charset=utf-8",
-                             index_html, sizeof(index_html) - 1U, head_only);
+                             &index_html, sizeof(index_html) - 1, head_only);
 
     static const char not_found[] = "Not found\n";
     return send_response(connection, 404, "Not Found", "text/plain",
@@ -338,7 +379,7 @@ static int handle_request(struct mg_connection *connection) {
 }
 
 int main(void) {
-    static web_state_t state;
+    static web_state_t state = {.html_length = 0};
     struct mg_callbacks callbacks = {.begin_request = handle_request};
     struct mg_context *server = NULL;
     const char *http_address = getenv("GS_HTTP_ADDRESS");
@@ -377,6 +418,11 @@ int main(void) {
     if ((rv = nng_dial(state.commands, GROUNDSTATION_COMMAND_NNG_URL,
                        NULL, NNG_FLAG_NONBLOCK)) != 0)
         goto nng_error;
+
+    if (build_html(UI_HTML_ADDRESS, &state) != 0) {
+        fprintf(stderr, "Failed to build web UI from %s\n", UI_HTML_ADDRESS);
+        goto cleanup;
+    }
 
     (void)mg_init_library(0);
     http_initialized = 1;
@@ -431,5 +477,6 @@ cleanup:
     if (commands_open) (void)nng_close(state.commands);
     if (subscriber_open) (void)nng_close(subscriber);
     if (state.mutex != NULL) nng_mtx_free(state.mutex);
+    if (state.html_length > 0) free(state.html_ptr);
     return result;
 }

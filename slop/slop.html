@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang='en'>
+    <head>
+        <meta charset='utf-8'>
+        <meta name='viewport' content='width=device-width,initial-scale=1'>
+        <title>
+            Flight Ground Station
+        </title>
+        <style>
+            body {
+                font:16px system-ui,sans-serif;
+                background:#101820;
+                color:#e5edf5;
+                max-width:1100px;
+                margin:32px auto;
+                padding:0 20px
+            }
+            h1 {
+                margin-bottom:4px
+            }
+            h2 {
+                margin-top:30px
+            }
+            p {
+                color:#adc0d0
+            }
+            .grid {
+                display:grid;
+                grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+                gap:12px
+            }
+            .card {
+                background:#1c2b38;
+                padding:16px;
+                border-radius:8px;
+                overflow-wrap:anywhere
+            }
+            .card strong {
+                display:block;
+                font-size:20px;
+                margin-top:8px;
+                font-weight:600
+            }
+            pre {
+                background:#1c2b38;
+                padding:16px;
+                border-radius:8px;
+                overflow:auto
+            }
+            button {
+                background:#286b9c;
+                color:white;
+                border:0;
+                border-radius:6px;
+                padding:12px 16px;
+                margin:0 8px 8px 0;
+                cursor:pointer;
+                font:inherit
+            }
+            button:disabled {
+                opacity:.5;
+                cursor:wait
+            }
+            button.safe {
+                background:#326b4b
+            }
+        </style>
+    </head>
+    <body>
+        <h1>
+            Flight Ground Station
+        </h1>
+        <p id='status' role='status'>
+            Waiting for ADCS telemetry...
+        </p>
+        <div class='grid'>
+            <div class='card'>
+                Packets
+                <strong id='packets'>
+                    0
+                </strong>
+            </div>
+            <div class='card'>
+                RF received
+                <strong id='age'>
+                    Never
+                </strong>
+            </div>
+            <div class='card'>
+                OBC sample age
+                <strong id='sample-age'>
+                    Never
+                </strong>
+            </div>
+            <div class='card'>
+                ADCS mode
+                <strong id='mode'>
+                    —
+                </strong>
+            </div>
+            <div class='card'>
+                ADCS sequence
+                <strong id='sequence'>
+                    —
+                </strong>
+            </div>
+            <div class='card'>
+                Sensor validity
+                <strong id='sensors'>
+                    —
+                </strong>
+            </div>
+            <div class='card'>
+                Active faults
+                <strong id='faults'>
+                    —
+                </strong>
+            </div>
+            <div class='card'>
+                Estimated rate (rad/s)
+                <strong id='rate'>
+                    —
+                </strong>
+            </div>
+            <div class='card'>
+                Attitude quaternion
+                <strong id='quaternion'>
+                    —
+                </strong>
+            </div>
+            <div class='card'>
+                Magnetic field (T)
+                <strong id='magnetic'>
+                    —
+                </strong>
+            </div>
+            <div class='card'>
+                Sun vector
+                <strong id='sun'>
+                    —
+                </strong>
+            </div>
+            <div class='card'>
+                Confidence
+                <strong id='confidence'>
+                    —
+                </strong>
+            </div>
+            <div class='card'>
+                Control / health flags
+                <strong id='flags'>
+                    —
+                </strong>
+            </div>
+            <div class='card'>
+                Dropped messages
+                <strong id='dropped'>
+                    —
+                </strong>
+            </div>
+            <div class='card'>
+                Rejected commands
+                <strong id='rejected'>
+                    —
+                </strong>
+            </div>
+            <div class='card'>
+                Minimum stack margin
+                <strong id='stack'>
+                    —
+                </strong>
+            </div>
+        </div>
+        <h2>
+            Commands
+        </h2>
+        <p>
+            Run the link check to verify RF uplink, ADCS acknowledgment, and fresh IMU-valid telemetry downlink.
+        </p>
+        <button class='safe' data-command='linkcheck'>
+            Run end-to-end link check
+        </button>
+        <button class='safe' data-command='safe'>
+            Set ADCS Safe
+        </button>
+        <button class='safe' data-command='inhibit'>
+            Inhibit actuators
+        </button>
+        <button data-command='reset_imu'>
+            Reset IMU
+        </button>
+        <button data-command='sun'>
+            Point to Sun
+        </button>
+        <button data-command='photo'>
+            Take photo
+        </button>
+        <p id='command-status' role='status'>
+            
+        </p>
+        <h2>
+            Latest decoded record
+        </h2>
+        <pre id='record'>
+            Waiting...
+        </pre>
+        <script>
+            const el = id => document.getElementById(id);
+            let lastRequest = null, linkCheck = null, lastPackets = 0, lastSampleUs = 0;
+            const modes = ['BOOT','SAFE','DETUMBLE','SUN ACQUISITION','SUN POINTING','EARTH POINTING','SLEWING','TARGET POINTING','SCIENCE'];
+            const vec = a => a.map(x => Number.isFinite(x) ? x.toPrecision(4) : '—').join(', ');
+            async function refresh() {
+                try {
+                    const r = await fetch('/api/telemetry',{cache:'no-store',signal:AbortSignal.timeout(5000)});
+                    if(!r.ok) {
+                        throw Error('HTTP ' + r.status);
+                    }
+                    const d = await r.json();
+                    lastPackets = d.packets;
+                    lastSampleUs = d.telemetry?.received_unix_us||0;
+                    el('packets').textContent = d.packets.toLocaleString();
+                    el('age').textContent = d.packets?(d.age_ms/1000).toFixed(1)+' s ago':'Never';
+                    const sampleAgeMs = d.telemetry?Date.now()-d.telemetry.received_unix_us/1000:Infinity;
+                    el('sample-age').textContent = !d.telemetry ? 'Never' :
+                        sampleAgeMs < -2000 ? 'Check Pi/Mac clocks' :
+                        (Math.max(0,sampleAgeMs)/1000).toFixed(1)+' s';
+                    el('status').textContent=!d.packets?'Waiting for ADCS telemetry...':
+                        d.age_ms<5000&&sampleAgeMs>=-2000&&sampleAgeMs<10000?
+                        'Receiving recent ADCS telemetry':'Telemetry sample stale';
+                    if(d.telemetry) {
+                        const t = d.telemetry;
+                        el('mode').textContent = modes[t.mode] || t.mode;
+                        el('sequence').textContent = t.sequence;
+                        el('sensors').textContent = ['gyro','accel','mag','sun'].filter((_,i) => t.sensor_valid_mask&(1<<i)).join(', ') || 'none';
+                        el('faults').textContent = '0x' + t.active_faults.toString(16);
+                        el('rate').textContent = vec(t.estimated_rate_rad_s);
+                        el('quaternion').textContent = vec(t.quaternion);
+                        el('magnetic').textContent = vec(t.magnetic_field_t);
+                        el('sun').textContent = vec(t.sun_vector_body);
+                        el('confidence').textContent = Number.isFinite(t.confidence) ? t.confidence.toFixed(3) : '—';
+                        el('flags').textContent = '0x' + t.control_flags.toString(16) + ' / 0x' + t.health_flags.toString(16);
+                        el('dropped').textContent = t.dropped_messages;
+                        el('rejected').textContent = t.rejected_commands;
+                        el('stack').textContent = Number.isFinite(t.minimum_stack_margin_words) ? t.minimum_stack_margin_words.toFixed(0) + ' words' : '—';
+                        el('record').textContent = JSON.stringify(t,null,2);
+                    }
+                    if(lastRequest && d.command_result && d.command_result.request_id===lastRequest.id) {
+                        const labels = ['ADCS ACK','ADCS NACK','ADCS timeout','OBC route error','OBC queued'];
+                        el('command-status').textContent = lastRequest.name + ': ' + labels[d.command_result.status] + '.';
+                        lastRequest = null;
+                    }
+                    else if(lastRequest && !linkCheck && Date.now() > lastRequest.deadline){
+                        el('command-status').textContent = lastRequest.name + ': no flight result within 45 s.';
+                        lastRequest = null;
+                    }
+                    if(linkCheck){
+                        const a = d.command_result;
+                        const ack = !!(a && a.request_id===linkCheck.id && a.status===0);
+                        const fresh =
+                            d.packets>linkCheck.startPackets &&
+                            !!d.telemetry &&
+                            d.telemetry.received_unix_us>linkCheck.startSampleUs &&
+                            sampleAgeMs>=-2000 &&
+                            sampleAgeMs<10000 &&
+                            d.telemetry.received_unix_us/1000>=linkCheck.sentAtMs-2000;
+                        const safe = fresh && d.telemetry.mode===1;
+                        const imu = fresh && (d.telemetry.sensor_valid_mask&3)===3;
+                        const progress = 'ADCS ACK '+(ack?'yes':'pending')+', fresh SAFE telemetry '+(safe?'yes':'pending')+
+                            ', gyro/accel valid '+(imu?'yes':'pending')+'.';
+                        if(a&&a.request_id===linkCheck.id&&a.status!==0){
+                            el('command-status').textContent='Link check FAILED: '+
+                                ['','ADCS NACK','ADCS reply timeout','OBC route error','OBC-only result'][a.status];linkCheck=null;
+                        }
+                        else if(ack&&safe&&imu){
+                            el('command-status').textContent='Link check PASS: ADCS ACK + fresh SAFE telemetry + gyro/accel valid.';linkCheck=null;
+                        }
+                        else if(Date.now()>linkCheck.deadline){
+                            el('command-status').textContent='Link check FAILED after 45 s: '+progress;linkCheck=null;
+                        }
+                        else{
+                            el('command-status').textContent='Link check waiting: '+progress;
+                        }
+                    }
+                }
+                catch(e) {
+                    el('status').textContent='Web connection unavailable: '+e.message;
+                }
+                finally {
+                    setTimeout(refresh,500);
+                }
+            }
+            refresh();
+            document.querySelectorAll('[data-command]').forEach(button=>button.addEventListener('click',async()=>{
+                button.disabled = true;
+                try{
+                    const checking = button.dataset.command==='linkcheck';
+                    const r = await fetch('/api/command',{method:'POST',headers:{'Content-Type':'text/plain'},
+                        body:checking?'safe':button.dataset.command,signal:AbortSignal.timeout(5000)});
+                    if(!r.ok){
+                        throw Error(await r.text());
+                    }
+                    const d = await r.json();
+                    lastRequest = {id:d.request_id,name:button.textContent,deadline:Date.now()+45000};
+                    linkCheck = checking ? {id:d.request_id, startPackets:lastPackets,
+                        startSampleUs:lastSampleUs, sentAtMs:Date.now(),deadline:Date.now()+45000} : null;
+                    el('command-status').textContent = button.textContent+' queued (request '+d.request_id+').';
+                }
+                catch(e){
+                    el('command-status').textContent = e.message;
+                }
+                finally{
+                    button.disabled=false;
+                }
+            }));
+        </script>
+    </body>
+</html>
