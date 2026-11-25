@@ -60,14 +60,15 @@
             - [x] put ALL this information on website
                 - wesley and/or claude alr did apparently
         - [ ] storage (backup)
-            - [ ] rework storage to use flight_protocol over serial
-                - [ ] able to recv acds telemetry and cmd result
-                - [ ] store with separators - uint8 to hex surrounded with curly braces
-            - [ ] compression of files before storage
+            - [x] rework storage to use flight_protocol over serial
+                - [x] able to recv acds telemetry and cmd result
+                - [x] store with separators - uint8 to hex surrounded with curly braces
             - [ ] look into s3
             - [ ] timings (see tracking)
                 - save to hard drive when satellite in view (actively recieving)
                 - upload to internet when satellite out of range
+            - [ ] compression of files before storage
+                - upload in chunks (see timings)
     - [ ] tracking - like obc? how tf we doin this? computation or camera or what
         - [ ] position - how tf
         - [ ] distance - radio time to send maybe?
