@@ -14,8 +14,8 @@
 #define MAX_PACKETS_STORED 50L
 #define MAX_PACKET_SIZE (sizeof(gs_adcs_telemetry_t) * 2 + 1)
 
-#define BACKUP_ADDRESS "telemetry_backup.txt"
-#define COPY_ADDRESS "telemetry_copy.txt"
+#define BACKUP_ADDRESS "data/telemetry_backup.txt"
+#define COPY_ADDRESS "data/telemetry_copy.txt"
 
 static volatile sig_atomic_t keep_running = 0;
 
