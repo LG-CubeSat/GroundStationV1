@@ -16,9 +16,11 @@ test:
     until [ -e /tmp/gs-rx ]; do sleep 0.1; done
     E22_UART_DEVICE=/tmp/gs-rx ./build/GSMain &
     ./build/GSEyecandy &
+    ./build/GSBackup &
     python3 tests/test_groundstation.py --port /tmp/gs-tx --count 0 &
 
-stop-test:
-    pkill GSMain
-    pkill GSEyecandy
-    pkill socat
+stop:
+    pkill GSMain || test $? -eq 1
+    pkill GSEyecandy || test $? -eq 1
+    pkill GSBackup || test $? -eq 1
+    pkill socat || test $? -eq 1

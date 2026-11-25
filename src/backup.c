@@ -12,7 +12,7 @@
 #include "flight_protocol.h"
 
 #define MAX_PACKETS_STORED 50L
-#define MAX_PACKET_SIZE sizeof(gs_adcs_telemetry_t)
+#define MAX_PACKET_SIZE (sizeof(gs_adcs_telemetry_t) * 2 + 1)
 
 #define BACKUP_ADDRESS "telemetry_backup.txt"
 #define COPY_ADDRESS "telemetry_copy.txt"
@@ -67,7 +67,6 @@ static long goto_second_packet(FILE* file) {
 
 // save to backup file
 static int write_telemetry(const uint8_t *data, size_t len) {
-    fprintf(stderr, "writing data")
     size_t bytes_written;
     size_t i;
     FILE* file = fopen(BACKUP_ADDRESS, "a");
@@ -228,7 +227,7 @@ static CURLcode upload_telemetry(backup_context_t *context) {
             curl_slist_free_all(headers);
             return curl_rv;
         }
-        headers = curl_slist_append(headers, "Content-Type: application/octet-stream");
+        headers = curl_slist_append(headers, "Content-Type: text/plain");
         if (headers == NULL) {
             curl_easy_cleanup(handle);
             curl_slist_free_all(headers);
@@ -296,15 +295,19 @@ static long get_packets_saved() {
     long packet_count = 0;
     int prev_char;
     int cursor = 0;
+    long last_spacer;
+
     FILE *file = fopen(BACKUP_ADDRESS, "r");
     if (file == NULL) {
         FILE *copy_file = fopen(COPY_ADDRESS, "r");
         if (copy_file == NULL) {
             fprintf(stderr, "Backup file does not exist, creating new backup file\n");
-            if (write_telemetry(NULL, 0) != 0) { // create backup file if doesn't exist
+            file = fopen(BACKUP_ADDRESS, "w");
+            if (file == NULL) { // create backup file if doesn't exist
                 fprintf(stderr, "Failed to create backup file\n");
                 return -1;
             }
+            fclose(file);
             return 0;
         } else {
             fprintf(stderr, "Attempting to recover backup file...\n");
@@ -314,7 +317,7 @@ static long get_packets_saved() {
             }
             fprintf(stderr, "Backup file recovered successfully\n");
             fclose(copy_file);
-            file = fopen(BACKUP_ADDRESS, "rb");
+            file = fopen(BACKUP_ADDRESS, "r");
             if (file == NULL) {
                 fprintf(stderr, "Failed to open recovered backup file\n");
                 return -1;
@@ -327,11 +330,24 @@ static long get_packets_saved() {
         cursor = fgetc(file);
         if (cursor == (int)';') {
             packet_count ++;
+            last_spacer = ftell(file);
+            if (last_spacer < 0) {
+                fprintf(stderr, "Failed to find location of last spacer in backup file\n");
+            }
         }
     }
     if (cursor != EOF) {
-        fprintf(stderr, "Failed to get next character of backup file");
+        fprintf(stderr, "Failed to get next character of backup file\n");
         return -1;
+    }
+
+    if (prev_char != ';') {
+        fprintf(stderr, "File contains trailing data\n");
+        if (truncate(BACKUP_ADDRESS, last_spacer + 1) != 0) {
+            fprintf(stderr, "Failed to remove trailing data\n");
+            return -1;
+        }
+        fprintf(stderr, "Removed trailing data\n");
     }
 
     return packet_count;

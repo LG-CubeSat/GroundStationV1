@@ -108,8 +108,7 @@ def main(argv=None) -> int:
                 packet = telemetry_packet(sequence)
                 if fd is not None:
                     write_packet(fd, packet)
-                print(f"{'Preview' if args.dry_run else 'Sent'} ADCS sequence={sequence} "
-                      f"bytes={len(packet)} hex={packet.hex()}", flush=True)
+                print(f"{'Preview' if args.dry_run else 'Sent'} ADCS sequence={sequence}", flush=True)
                 sent += 1
                 if args.count == 0 or sent < args.count:
                     time.sleep(args.interval)
