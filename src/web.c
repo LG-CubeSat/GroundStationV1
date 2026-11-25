@@ -7,16 +7,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <civetweb.h>
 #include <nng/nng.h>
 #include <nng/protocol/pipeline0/push.h>
 #include <nng/protocol/pubsub0/sub.h>
 
+#include "civetweb.h"
 #include "groundstation_message.h"
 #include "flight_protocol.h"
 
 #define HTTP_ADDRESS "127.0.0.1:8080"
-#define UI_HTML_ADDRESS "src/slop.html"
+#define UI_HTML_ADDRESS "slop/slop.html"
 
 typedef struct {
     nng_mtx *mutex;

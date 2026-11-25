@@ -8,16 +8,14 @@
 #include "nng/nng.h"
 #include "nng/protocol/pubsub0/sub.h"
 #include "curl/curl.h"
-#include "serial.h"
 #include "groundstation_message.h"
+#include "flight_protocol.h"
 
-#define PACKET_SIZE sizeof(groundstation_telemetry_packet_t) // 20 bytes
-#define MAX_PACKETS_STORED 50
+#define MAX_PACKETS_STORED 50L
+#define MAX_PACKET_SIZE sizeof(gs_adcs_telemetry_t)
 
-#define BACKUP_ADDRESS "telemetry_backup.bin"
-#define COPY_ADDRESS "telemetry_copy.bin"
-
-// build/GSMain & build/GSBackup & build/GSEyecandy & sleep 5; build/GSTest &
+#define BACKUP_ADDRESS "telemetry_backup.txt"
+#define COPY_ADDRESS "telemetry_copy.txt"
 
 static volatile sig_atomic_t keep_running = 0;
 
@@ -45,18 +43,60 @@ static size_t http_callback(char *data, size_t size, size_t count, void *arg) {
     return size * count;
 }
 
-int write_telemetry(const void *data, size_t len) {
-    // save to backup file
-    FILE* file = fopen(BACKUP_ADDRESS, "ab");
+// returns size of first packet as well
+static long goto_second_packet(FILE* file) {
+    int cursor = 0;
+    long position;
 
+    while (cursor != (int)';') {
+        if (cursor < 0) {
+            fprintf(stderr, "Failed to go to end of first packet in backup file\n");
+            return -1;
+        }
+        cursor = fgetc(file);
+    }
+
+    position = ftell(file);
+    if (position < 0) {
+        fprintf(stderr, "Failed to find end of first packet in backup file\n");
+        return -1;
+    }
+
+    return position;
+}
+
+// save to backup file
+static int write_telemetry(const uint8_t *data, size_t len) {
+    fprintf(stderr, "writing data")
+    size_t bytes_written;
+    size_t i;
+    FILE* file = fopen(BACKUP_ADDRESS, "a");
     if (file == NULL) {
-        fprintf(stderr, "Unable to open backup file for writing\n");
+        fprintf(stderr, "Faiiled to open backup file for writing\n");
         return 1;
     }
 
-    size_t bytes_written = fwrite(data, 1, len, file);
-    if (bytes_written != len) {
-        fprintf(stderr, "Wrote %zu bytes to backup file but expected %zu\n", bytes_written, len);
+    for (i = 0; i < len; i++) {
+        bytes_written = fprintf(file, "%02X", data[i]);
+        if (bytes_written < 2) {
+            if (bytes_written < 0) {
+                perror("Failed write to backup file");
+                fclose(file);
+                return 1;
+            }
+            fprintf(stderr, "Wrote %zu bytes to backup file but expected 2\n", bytes_written);
+            fclose(file);
+            return 1;
+        }
+    }
+    bytes_written = fprintf(file, ";");
+    if (bytes_written < 1) {
+        if (bytes_written < 0) {
+            perror("Failed write to backup file");
+            fclose(file);
+            return 1;
+        }
+        fprintf(stderr, "Wrote %zu bytes to backup file but expected 1\n", bytes_written);
         fclose(file);
         return 1;
     }
@@ -68,50 +108,69 @@ int write_telemetry(const void *data, size_t len) {
     return 0;
 }
 
-static int read_telemetry(void *buffer) {
-    FILE* file = fopen(BACKUP_ADDRESS, "rb");
+static long read_telemetry(void *buffer) {
+    size_t bytes_written;
+    long position;
+    size_t packet_size;
+    FILE* file = fopen(BACKUP_ADDRESS, "r");
     if (file == NULL) {
-        fprintf(stderr, "Unable to open backup file for reading\n");
-        return 1;
+        fprintf(stderr, "Failed to open backup file for reading\n");
+        return -1;
+    }
+
+    position = goto_second_packet(file);
+    if (position < 0) {
+        fclose(file);
+        return -1;
+    }
+    packet_size = (size_t)position;
+
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        fprintf(stderr, "Failed to reset cursor to beginning of file\n");
+        fclose(file);
+        return -1;
     }
 
     // read first packet
-    size_t bytes_written = fread(buffer, 1, PACKET_SIZE, file);
-    if (bytes_written != PACKET_SIZE) {
-        fprintf(stderr, "Read %zu bytes from backup file but expected %zu\n", bytes_written, PACKET_SIZE);
+    bytes_written = fread(buffer, 1, packet_size, file);
+    if (bytes_written != packet_size) {
+        fprintf(stderr, "Read %zu bytes from backup file but expected %zu\n", bytes_written, packet_size);
         fclose(file);
-        return 1;
+        return -1;
     }
     if (fclose(file) != 0) {
         fprintf(stderr, "Failed to close backup file\n");
-        return 1;
+        return -1;
     }
-    return 0;
+    return position;
 }
 
 static int free_telemetry() {
-    FILE* file = fopen(BACKUP_ADDRESS, "rb");
+    size_t packet_size;
+    long position;
+    FILE* file = fopen(BACKUP_ADDRESS, "r");
     if (file == NULL) {
         fprintf(stderr, "Unable to open backup file for reading\n");
         return 1;
     }
-    FILE* copy_file = fopen(COPY_ADDRESS, "wb");
+    FILE* copy_file = fopen(COPY_ADDRESS, "w");
     if (copy_file == NULL) {
         fprintf(stderr, "Unable to open copy file\n");
         fclose(file);
         return 1;
     }
 
-    // remove first packet by copying
-    if (fseek(file, PACKET_SIZE, SEEK_SET) != 0) {
-        fprintf(stderr, "Failed to seek in backup file\n");
+    position = goto_second_packet(file);
+    if (position < 0) {
         fclose(file);
         fclose(copy_file);
         return 1;
     }
-    uint8_t temp_buffer[PACKET_SIZE];
+    packet_size = (size_t)position;
+
+    uint8_t temp_buffer[packet_size];
     size_t bytes_read;
-    while ((bytes_read = fread(temp_buffer, 1, PACKET_SIZE, file)) > 0) {
+    while ((bytes_read = fread(temp_buffer, 1, packet_size, file)) > 0) {
         if (fwrite(temp_buffer, 1, bytes_read, copy_file) != bytes_read) {
             fprintf(stderr, "Failed to write to copy file\n");
             fclose(file);
@@ -149,10 +208,12 @@ static CURLcode upload_telemetry(backup_context_t *context) {
     CURLcode curl_rv;
     struct curl_slist *headers = NULL;
     long HTTP_rv = 0;
-    uint8_t buffer[PACKET_SIZE];
+    uint8_t buffer[MAX_PACKET_SIZE];
+    long packet_size;
 
     pthread_mutex_lock(&context->file_mutex);
-    if (read_telemetry(buffer) != 0) {
+    packet_size = read_telemetry(buffer);
+    if (packet_size < 0) {
         pthread_mutex_unlock(&context->file_mutex);
         fprintf(stderr, "Failed to read telemetry from backup file\n");
         return CURLE_READ_ERROR;
@@ -161,7 +222,7 @@ static CURLcode upload_telemetry(backup_context_t *context) {
 
     handle = curl_easy_init();
     if (handle) {
-        curl_rv = curl_easy_setopt(handle, CURLOPT_URL, "https://httpbin.org/post"); // still finding good storage
+        curl_rv = curl_easy_setopt(handle, CURLOPT_URL, "https://httpbin.org/post"); // still finding good storage - look into s3
         if (curl_rv != CURLE_OK) {
             curl_easy_cleanup(handle);
             curl_slist_free_all(headers);
@@ -185,7 +246,7 @@ static CURLcode upload_telemetry(backup_context_t *context) {
             curl_slist_free_all(headers);
             return curl_rv;
         }
-        curl_rv = curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE, PACKET_SIZE);
+        curl_rv = curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE, (size_t)packet_size);
         if (curl_rv != CURLE_OK) {
             curl_easy_cleanup(handle);
             curl_slist_free_all(headers);
@@ -233,9 +294,11 @@ static CURLcode upload_telemetry(backup_context_t *context) {
 
 static long get_packets_saved() {
     long packet_count = 0;
-    FILE *file = fopen(BACKUP_ADDRESS, "rb");
+    int prev_char;
+    int cursor = 0;
+    FILE *file = fopen(BACKUP_ADDRESS, "r");
     if (file == NULL) {
-        FILE *copy_file = fopen(COPY_ADDRESS, "rb");
+        FILE *copy_file = fopen(COPY_ADDRESS, "r");
         if (copy_file == NULL) {
             fprintf(stderr, "Backup file does not exist, creating new backup file\n");
             if (write_telemetry(NULL, 0) != 0) { // create backup file if doesn't exist
@@ -258,30 +321,19 @@ static long get_packets_saved() {
             }
         }
     }
-    if (fseek(file, 0, SEEK_END) != 0) {
-        fprintf(stderr, "Failed to seek in backup file\n");
-        fclose(file);
-        return -1;
-    }
-    long size = ftell(file);
-    if (size < 0) {
-        fprintf(stderr, "Failed to get size of backup file\n");
-        fclose(file);
-        return -1;
-    }
-    if (fclose(file) != 0) {
-        fprintf(stderr, "Failed to close backup file\n");
-        return -1;
-    }
-    packet_count = size / PACKET_SIZE;
-    if (size % PACKET_SIZE != 0) {
-        fprintf(stderr, "Backup file contains trailing data\n");
-        if (truncate(BACKUP_ADDRESS, packet_count * PACKET_SIZE) != 0) {
-            fprintf(stderr, "Failed to remove trailing data\n");
-            return -1;
+
+    while (cursor >= 0) {
+        prev_char = cursor;
+        cursor = fgetc(file);
+        if (cursor == (int)';') {
+            packet_count ++;
         }
-        fprintf(stderr, "Removed trailing data\n");
     }
+    if (cursor != EOF) {
+        fprintf(stderr, "Failed to get next character of backup file");
+        return -1;
+    }
+
     return packet_count;
 }
 
@@ -415,7 +467,7 @@ int main(void) {
     upload_active = 1;
 
     // main loop
-    while(keep_running) {
+    while (keep_running) {
         // check if upload thread stopped
         pthread_mutex_lock(&context->stop_mutex);
         if (context->stop_thread != 0) {
@@ -437,9 +489,9 @@ int main(void) {
             goto nng_error;
         }
 
-        if (nng_msg_len(message) != PACKET_SIZE) {
-            fprintf(stderr, "Dropping packet of size %zu; expected packet of size %zu\n",
-                    nng_msg_len(message), PACKET_SIZE);
+        if (nng_msg_len(message) != sizeof(gs_adcs_telemetry_t) &&
+            nng_msg_len(message) != sizeof(gs_command_result_t)) {
+            fprintf(stderr, "Dropping packet of unexpected size: %zu\n", nng_msg_len(message));
             nng_msg_full_free(&message);
             continue;
         }

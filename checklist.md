@@ -18,6 +18,7 @@
     - [ ] telemetry (downlink)
         - [ ] recieving (radio)
             - [ ] integrate avi filter?
+                - [ ] ask avi if its in the radio alr
         - [ ] parsing/decoding
             - [ ] figure out wtf packet police is
         - [ ] control center (website)
@@ -60,6 +61,8 @@
                 - wesley and/or claude alr did apparently
         - [ ] storage (backup)
             - [ ] rework storage to use flight_protocol over serial
+                - [ ] able to recv acds telemetry and cmd result
+                - [ ] store with separators - uint8 to hex surrounded with curly braces
             - [ ] compression of files before storage
             - [ ] look into s3
             - [ ] timings (see tracking)
